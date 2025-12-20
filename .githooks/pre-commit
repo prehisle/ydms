@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${SKIP_GITHOOKS:-}" == "1" ]]; then
+  echo "[githooks] SKIP_GITHOOKS=1 -> skip"
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+staged_files="$(git diff --cached --name-only --diff-filter=ACM || true)"
+
+echo "[githooks] pre-commit: lint/typecheck"
+
+go_files="$(echo "$staged_files" | rg -N '\\.go$' || true)"
+if [[ -n "$go_files" ]]; then
+  echo "[githooks] gofmt check (staged .go)"
+  unformatted="$(echo "$go_files" | xargs -r gofmt -l || true)"
+  if [[ -n "$unformatted" ]]; then
+    echo "gofmt needed on:"
+    echo "$unformatted"
+    echo "Fix: gofmt -w <file> (then re-stage)"
+    exit 1
+  fi
+
+  echo "[githooks] golangci-lint (backend)"
+  if ! command -v golangci-lint >/dev/null 2>&1; then
+    echo "golangci-lint not found."
+    echo "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8"
+    exit 1
+  fi
+  (cd backend && golangci-lint run ./...)
+fi
+
+frontend_files="$(echo "$staged_files" | rg -N '^frontend/.*\\.(ts|tsx|mts|cts|js|jsx|json)$' || true)"
+if [[ -n "$frontend_files" ]]; then
+  echo "[githooks] tsc typecheck (frontend)"
+  if [[ ! -d frontend/node_modules ]]; then
+    echo "frontend/node_modules missing."
+    echo "Fix: (cd frontend && npm ci)"
+    exit 1
+  fi
+  (cd frontend && npm run -s typecheck)
+fi
+
+echo "[githooks] OK"

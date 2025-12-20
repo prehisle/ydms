@@ -45,6 +45,11 @@ install-backend: ## 安装后端依赖
 
 install: install-backend install-frontend ## 安装所有依赖
 
+hooks: ## 安装本仓库 git hooks（阻止未通过的提交/推送）
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/pre-commit .githooks/pre-push
+	@echo "已启用 hooks: core.hooksPath=.githooks"
+
 docs-check: ## 检查 Markdown 内部链接有效性
 	@bash scripts/check-docs.sh
 

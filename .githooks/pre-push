@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${SKIP_GITHOOKS:-}" == "1" ]]; then
+  echo "[githooks] SKIP_GITHOOKS=1 -> skip"
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[githooks] pre-push: tests"
+
+if [[ -d backend ]]; then
+  echo "[githooks] go test (backend)"
+  (cd backend && go test ./... -cover)
+fi
+
+if [[ -d frontend ]]; then
+  if [[ ! -d frontend/node_modules ]]; then
+    echo "frontend/node_modules missing."
+    echo "Fix: (cd frontend && npm ci)"
+    exit 1
+  fi
+  echo "[githooks] frontend tests (coverage)"
+  (cd frontend && npm run -s test:coverage)
+fi
+
+echo "[githooks] OK"
