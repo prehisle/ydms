@@ -35,14 +35,6 @@ var (
 	}
 )
 
-// mockUserService 用于测试的简单 mock
-type mockUserService struct{}
-
-func (m *mockUserService) GetUserCourses(userID uint) ([]int64, error) {
-	// 返回空列表，表示用户没有课程权限限制
-	return []int64{}, nil
-}
-
 func TestProofreaderPermissions_DocumentOperations(t *testing.T) {
 	ndr := newInMemoryNDR()
 	svc := service.NewService(cache.NewNoop(), ndr, nil)

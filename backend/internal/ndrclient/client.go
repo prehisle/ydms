@@ -513,7 +513,6 @@ func (c *httpClient) do(req *http.Request, out any) (*http.Response, error) {
 	}
 
 	if resp.StatusCode >= 400 {
-		io.Copy(io.Discard, bytes.NewReader(respBody))
 		return resp, &Error{StatusCode: resp.StatusCode, Status: resp.Status}
 	}
 	if out != nil {

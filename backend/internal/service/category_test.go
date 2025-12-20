@@ -27,7 +27,6 @@ type fakeNDR struct {
 	createResp    ndrclient.Node
 	updateResp    ndrclient.Node
 	restoreResp   ndrclient.Node
-	moveResp      ndrclient.Node
 	reorderResp   []ndrclient.Node
 	reorderErr    error
 	reorderInput  *ndrclient.NodeReorderPayload

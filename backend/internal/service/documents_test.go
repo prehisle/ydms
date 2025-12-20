@@ -327,10 +327,6 @@ func sampleDocument(id int64, title string, docType string, position int, create
 	}
 }
 
-func ptrDoc[T any](v T) *T {
-	return &v
-}
-
 func TestAddDocumentReference(t *testing.T) {
 	fake := newFakeNDR()
 	now := time.Now().UTC()

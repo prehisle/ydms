@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/yjxt/ydms/backend/internal/auth"
 	"github.com/yjxt/ydms/backend/internal/database"
 )
 
 // requireNotProofreader 检查当前用户不是校对员角色
 // 返回用户对象和可能的错误响应
 func (h *Handler) requireNotProofreader(r *http.Request, action string) (*database.User, *httpError) {
-	user, ok := r.Context().Value(auth.UserContextKey).(*database.User)
-	if !ok {
+	user, err := h.getCurrentUser(r)
+	if err != nil {
 		return nil, &httpError{
 			code:    http.StatusUnauthorized,
 			message: errors.New("user not found in context"),
@@ -32,8 +31,8 @@ func (h *Handler) requireNotProofreader(r *http.Request, action string) (*databa
 
 // requireRole 检查当前用户是否具有指定角色之一
 func (h *Handler) requireRole(r *http.Request, allowedRoles ...string) (*database.User, *httpError) {
-	user, ok := r.Context().Value(auth.UserContextKey).(*database.User)
-	if !ok {
+	user, err := h.getCurrentUser(r)
+	if err != nil {
 		return nil, &httpError{
 			code:    http.StatusUnauthorized,
 			message: errors.New("user not found in context"),

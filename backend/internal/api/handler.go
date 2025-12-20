@@ -1038,24 +1038,3 @@ func (h *Handler) getCurrentUser(r *http.Request) (*database.User, error) {
 	}
 	return user, nil
 }
-
-// getDocumentNodeID 获取文档关联的节点 ID（通过查询文档的绑定关系）
-func (h *Handler) getDocumentNodeID(r *http.Request, meta service.RequestMeta, docID int64) (int64, error) {
-	// 获取文档详情
-	doc, err := h.service.GetDocument(r.Context(), meta, docID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get document: %w", err)
-	}
-
-	// 如果文档有 node_id 绑定关系，返回该 ID
-	// 注意：NDR 文档可能没有绑定节点，此时返回错误
-	// TODO: 这里需要根据实际的 NDR API 响应结构来获取 node_id
-	// 暂时假设文档结构中有 NodeID 字段
-	if doc.ID == 0 {
-		return 0, errors.New("document not bound to any node")
-	}
-
-	// 暂时返回 0，实际应该从 doc 中提取 node_id
-	// 这需要根据 NDR API 的实际响应来实现
-	return 0, errors.New("node_id extraction not implemented")
-}

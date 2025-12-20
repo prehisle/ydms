@@ -51,7 +51,9 @@ func main() {
 	fmt.Print("是否继续? (输入 'yes' 确认): ")
 
 	var confirm string
-	fmt.Scanln(&confirm)
+	if _, err := fmt.Scanln(&confirm); err != nil {
+		log.Fatalf("读取确认输入失败: %v", err)
+	}
 
 	if confirm != "yes" {
 		log.Println("操作已取消")
