@@ -2,8 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [ "**" ]
-  pull_request:
+    branches: [ master ]
+    tags-ignore: [ "**" ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,9 +40,8 @@ jobs:
           name: go-coverage
           path: backend/coverage.out
 
-      - name: golangci-lint (non-blocking for initial adoption)
+      - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
-        continue-on-error: true
         with:
           version: latest
           working-directory: backend
