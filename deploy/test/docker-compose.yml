@@ -1,0 +1,66 @@
+# PDMS (YDMS) 测试环境 Docker Compose 配置
+# 使用方法: 通过 deploy-test.sh 脚本部署，会自动生成 .env 文件
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-ydms}_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ydms}
+      POSTGRES_USER: ${POSTGRES_USER:-ydms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ydms}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ydms} -d ${POSTGRES_DB:-ydms}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - ydms_network
+
+  ydms-app:
+    image: ${BACKEND_IMAGE:-ghcr.io/prehisle/ydms-backend:latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-ydms}_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 覆盖端口，让后端始终监听容器内部的 9180 端口
+      YDMS_HTTP_PORT: 9180
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${YDMS_HTTP_PORT:-9002}:9180"
+    volumes:
+      - ./data/logs:/app/logs
+      - ./data/app:/app/data
+    networks:
+      - ydms_network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/prehisle/ydms-frontend:latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-ydms}_frontend
+    restart: unless-stopped
+    depends_on:
+      - ydms-app
+    ports:
+      - "${HTTP_PORT:-9001}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - ydms_network
+
+networks:
+  ydms_network:
+    driver: bridge
