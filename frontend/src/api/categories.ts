@@ -7,6 +7,7 @@ export interface Category {
   path: string;
   parent_id: number | null;
   position: number;
+  subtree_doc_count: number;
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;

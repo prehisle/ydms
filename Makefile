@@ -1,9 +1,35 @@
-.PHONY: help quick-reset reset-db reset-init test-e2e dev clean docs-check docs-lint docs-openapi
+.PHONY: help quick-reset reset-db reset-init test-e2e dev clean docs-check docs-lint docs-openapi infra-up infra-down infra-logs infra-ps
 
 help: ## 显示帮助信息
 	@echo "YDMS 项目命令"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# ==================== 基础设施 ====================
+
+infra-up: ## 启动本地基础设施 (PostgreSQL, Redis, MinIO)
+	@docker compose -f deploy/dev/docker-compose.infra.yml up -d
+	@echo ""
+	@echo "基础设施已启动:"
+	@echo "  PostgreSQL: localhost:5432 (postgres/postgres)"
+	@echo "  Redis:      localhost:6379"
+	@echo "  MinIO:      localhost:9000 (minioadmin/minioadmin)"
+	@echo "  MinIO 控制台: http://localhost:9002"
+
+infra-down: ## 停止本地基础设施
+	@docker compose -f deploy/dev/docker-compose.infra.yml down
+
+infra-logs: ## 查看基础设施日志
+	@docker compose -f deploy/dev/docker-compose.infra.yml logs -f
+
+infra-ps: ## 查看基础设施状态
+	@docker compose -f deploy/dev/docker-compose.infra.yml ps
+
+infra-clean: ## 清理基础设施数据（谨慎！）
+	@docker compose -f deploy/dev/docker-compose.infra.yml down -v
+	@echo "基础设施数据已清理"
+
+# ==================== 数据库 ====================
 
 quick-reset: ## 快速重置（仅清空数据，推荐）
 	@./scripts/quick-reset.sh

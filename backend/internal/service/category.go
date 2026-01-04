@@ -16,16 +16,17 @@ import (
 
 // Category represents a catalog node exposed by the backend.
 type Category struct {
-	ID        int64       `json:"id"`
-	Name      string      `json:"name"`
-	Slug      string      `json:"slug"`
-	Path      string      `json:"path"`
-	ParentID  *int64      `json:"parent_id,omitempty"`
-	Position  int         `json:"position"`
-	CreatedAt string      `json:"created_at"`
-	UpdatedAt string      `json:"updated_at"`
-	DeletedAt *string     `json:"deleted_at,omitempty"`
-	Children  []*Category `json:"children,omitempty"`
+	ID              int64       `json:"id"`
+	Name            string      `json:"name"`
+	Slug            string      `json:"slug"`
+	Path            string      `json:"path"`
+	ParentID        *int64      `json:"parent_id,omitempty"`
+	Position        int         `json:"position"`
+	SubtreeDocCount int         `json:"subtree_doc_count"`
+	CreatedAt       string      `json:"created_at"`
+	UpdatedAt       string      `json:"updated_at"`
+	DeletedAt       *string     `json:"deleted_at,omitempty"`
+	Children        []*Category `json:"children,omitempty"`
 }
 
 // CategoryCreateRequest captures inputs from API layer.
@@ -1027,15 +1028,16 @@ func mapNode(node ndrclient.Node, parentID *int64) *Category {
 	}
 
 	return &Category{
-		ID:        node.ID,
-		Name:      node.Name,
-		Slug:      node.Slug,
-		Path:      node.Path,
-		ParentID:  actualParent,
-		Position:  node.Position,
-		CreatedAt: created,
-		UpdatedAt: updated,
-		DeletedAt: deletedAt,
+		ID:              node.ID,
+		Name:            node.Name,
+		Slug:            node.Slug,
+		Path:            node.Path,
+		ParentID:        actualParent,
+		Position:        node.Position,
+		SubtreeDocCount: node.SubtreeDocCount,
+		CreatedAt:       created,
+		UpdatedAt:       updated,
+		DeletedAt:       deletedAt,
 	}
 }
 

@@ -7,17 +7,18 @@ import (
 
 // Node represents the NDR node resource.
 type Node struct {
-	ID        int64      `json:"id"`
-	Name      string     `json:"name"`
-	Slug      string     `json:"slug"`
-	Path      string     `json:"path"`
-	ParentID  *int64     `json:"parent_id"`
-	Position  int        `json:"position"`
-	CreatedBy string     `json:"created_by"`
-	UpdatedBy string     `json:"updated_by"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	DeletedAt *time.Time `json:"deleted_at"`
+	ID              int64      `json:"id"`
+	Name            string     `json:"name"`
+	Slug            string     `json:"slug"`
+	Path            string     `json:"path"`
+	ParentID        *int64     `json:"parent_id"`
+	Position        int        `json:"position"`
+	SubtreeDocCount int        `json:"subtree_doc_count"`
+	CreatedBy       string     `json:"created_by"`
+	UpdatedBy       string     `json:"updated_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	DeletedAt       *time.Time `json:"deleted_at"`
 }
 
 // NodeCreate mirrors NDR create payload.

@@ -347,6 +347,8 @@ export function CategoryTreePanel({
   const renderTreeTitle = useCallback(
     (node: TreeDataNode) => {
       const nodeId = Number(node.key);
+      const category = lookups.byId.get(nodeId);
+      const docCount = category?.subtree_doc_count ?? 0;
       const isCutNode = clipboard?.mode === "cut" && clipboardSourceSet.has(nodeId);
       const isDropTarget = dropTargetNodeId === nodeId;
 
@@ -357,18 +359,32 @@ export function CategoryTreePanel({
             backgroundColor: isDropTarget ? "#e6f7ff" : "transparent",
             padding: "2px 8px",
             borderRadius: 4,
-            display: "inline-block",
+            display: "inline-flex",
+            alignItems: "center",
             width: "100%",
           }}
           onDragOver={(e) => handleNodeDragOver(e, nodeId)}
           onDragLeave={handleNodeDragLeave}
           onDrop={(e) => handleNodeDrop(e, nodeId)}
         >
-          {node.title as string}
+          <span style={{ flex: 1 }}>{node.title as string}</span>
+          {docCount > 0 && (
+            <Tag
+              color="blue"
+              style={{
+                marginLeft: 8,
+                fontSize: 11,
+                lineHeight: "16px",
+                padding: "0 4px",
+              }}
+            >
+              {docCount}
+            </Tag>
+          )}
         </span>
       );
     },
-    [clipboard, clipboardSourceSet, dropTargetNodeId, handleNodeDragOver, handleNodeDragLeave, handleNodeDrop],
+    [clipboard, clipboardSourceSet, dropTargetNodeId, lookups.byId, handleNodeDragOver, handleNodeDragLeave, handleNodeDrop],
   );
 
   const handleTreeRightClick = useCallback<NonNullable<AntTreeProps["onRightClick"]>>(
