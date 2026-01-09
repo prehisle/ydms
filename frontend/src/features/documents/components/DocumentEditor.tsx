@@ -1,6 +1,7 @@
-import { type FC, useState, useEffect, useCallback, useMemo } from "react";
+import { type FC, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
-import Editor from "@monaco-editor/react";
+import Editor, { type OnMount } from "@monaco-editor/react";
+import type { editor } from "monaco-editor";
 import {
   Button,
   Input,
@@ -12,6 +13,7 @@ import {
   Typography,
   Layout,
   Result,
+  Progress,
 } from "antd";
 import {
   SaveOutlined,
@@ -20,6 +22,7 @@ import {
   PlusOutlined,
   MinusCircleOutlined,
   LinkOutlined,
+  CopyOutlined,
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -45,6 +48,10 @@ import {
 } from "../../../api/documents";
 import type { MetadataValueType } from "../types";
 import { DocumentReferenceModal } from "./DocumentReferenceModal";
+import {
+  useFileUpload,
+  formatUploadLink,
+} from "../../../hooks/useFileUpload";
 
 const { Header, Content } = Layout;
 const { Title, Text } = Typography;
@@ -198,6 +205,11 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
   const [metadataEntries, setMetadataEntries] = useState<MetadataEntry[]>([]);
   const [pendingReferences, setPendingReferences] = useState<Array<{ document_id: number; title: string }>>([]);
   const [referenceModalOpen, setReferenceModalOpen] = useState(false);
+
+  // 文件上传 hook
+  const { uploadFile, uploading, progress } = useFileUpload();
+  // Monaco 编辑器实例引用
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   const cachedTagOptions = useMemo(
     () => getTags(documentType).map((tag) => ({ label: tag, value: tag })),
@@ -550,6 +562,81 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
     closeEditor();
   }, [closeEditor]);
 
+  // 处理编辑器挂载
+  const handleEditorMount: OnMount = useCallback((editorInstance) => {
+    editorRef.current = editorInstance;
+    console.log("[paste-debug] Editor mounted");
+  }, []);
+
+  // 使用 window 级别的捕获阶段监听粘贴事件
+  // Monaco Editor 会在内部 textarea 上处理 paste 并 stopPropagation，
+  // 所以必须在 capture 阶段拦截，并用 hasTextFocus() 判断焦点
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const editorInstance = editorRef.current;
+      if (!editorInstance) return;
+
+      // 只在编辑器有焦点时处理
+      if (!editorInstance.hasTextFocus()) return;
+
+      console.log("[paste-debug] Paste event triggered");
+      const items = e.clipboardData?.items;
+      console.log("[paste-debug] Clipboard items:", items?.length);
+      if (!items) return;
+
+      for (const item of Array.from(items)) {
+        console.log("[paste-debug] Item:", item.kind, item.type);
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (!file) continue;
+
+          // 只有找到文件才阻止默认行为，不影响正常文本粘贴
+          e.preventDefault();
+          e.stopPropagation();
+
+          const placeholder = `[上传中: ${file.name}...]`;
+          const selection = editorInstance.getSelection();
+
+          if (selection) {
+            editorInstance.executeEdits("paste-upload", [{
+              range: selection,
+              text: placeholder,
+              forceMoveMarkers: true,
+            }]);
+          }
+
+          try {
+            const result = await uploadFile(file);
+            const model = editorInstance.getModel();
+            if (model) {
+              const currentContent = model.getValue();
+              const newContent = currentContent.replace(placeholder, formatUploadLink(result));
+              model.setValue(newContent);
+              message.success(`文件 "${file.name}" 上传成功`);
+            }
+          } catch (err) {
+            const model = editorInstance.getModel();
+            if (model) {
+              const currentContent = model.getValue();
+              const errorText = `[上传失败: ${file.name}]`;
+              model.setValue(currentContent.replace(placeholder, errorText));
+            }
+            const errorMessage = err instanceof Error ? err.message : "上传失败";
+            message.error(errorMessage);
+          }
+          break;
+        }
+      }
+    };
+
+    // 在 capture 阶段监听，确保在 Monaco 处理之前捕获到事件
+    window.addEventListener("paste", handlePaste as unknown as EventListener, true);
+
+    return () => {
+      window.removeEventListener("paste", handlePaste as unknown as EventListener, true);
+    };
+  }, [uploadFile]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
@@ -644,6 +731,20 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
         </div>
 
         <Space>
+          {isEditMode && effectiveDocId && (
+            <Button
+              icon={<CopyOutlined />}
+              onClick={() => {
+                const docPath = `@doc:${effectiveDocId}`;
+                navigator.clipboard.writeText(docPath).then(
+                  () => message.success(`已复制文档路径: ${docPath}`),
+                  () => message.error("复制失败")
+                );
+              }}
+            >
+              复制路径
+            </Button>
+          )}
           <Button
             icon={<LinkOutlined />}
             onClick={() => setReferenceModalOpen(true)}
@@ -778,11 +879,12 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
             </Space>
           </div>
 
-          <div style={{ flex: 1, overflow: "hidden" }}>
+          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
             <Editor
               language={editorLanguage}
               value={content}
               onChange={(value) => setContent(value || "")}
+              onMount={handleEditorMount}
               theme="vs-dark"
               options={{
                 minimap: { enabled: true },
@@ -795,6 +897,28 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
                 insertSpaces: true,
               }}
             />
+            {/* 上传进度指示器 */}
+            {uploading && progress && (
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 20,
+                  right: 20,
+                  zIndex: 1000,
+                  background: "rgba(0, 0, 0, 0.75)",
+             borderRadius: 8,
+                  padding: 12,
+                }}
+              >
+                <Progress
+                  type="circle"
+                  percent={progress.percent}
+                  size={60}
+                  status="active"
+                  strokeColor="#1890ff"
+                />
+              </div>
+            )}
           </div>
         </div>
 

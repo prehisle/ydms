@@ -18,6 +18,7 @@ type Client interface {
 	Ping(ctx context.Context) error
 	CreateNode(ctx context.Context, meta RequestMeta, body NodeCreate) (Node, error)
 	GetNode(ctx context.Context, meta RequestMeta, id int64, opts GetNodeOptions) (Node, error)
+	GetNodeByPath(ctx context.Context, meta RequestMeta, path string, opts GetNodeOptions) (Node, error)
 	HasChildren(ctx context.Context, meta RequestMeta, id int64) (bool, error)
 	UpdateNode(ctx context.Context, meta RequestMeta, id int64, body NodeUpdate) (Node, error)
 	DeleteNode(ctx context.Context, meta RequestMeta, id int64) error
@@ -28,6 +29,7 @@ type Client interface {
 	PurgeNode(ctx context.Context, meta RequestMeta, id int64) error
 	ListDocuments(ctx context.Context, meta RequestMeta, query url.Values) (DocumentsPage, error)
 	ListNodeDocuments(ctx context.Context, meta RequestMeta, id int64, query url.Values) (DocumentsPage, error)
+	ListNodeDocumentsByPath(ctx context.Context, meta RequestMeta, path string, query url.Values) (DocumentsPage, error)
 	CreateDocument(ctx context.Context, meta RequestMeta, body DocumentCreate) (Document, error)
 	GetDocument(ctx context.Context, meta RequestMeta, docID int64) (Document, error)
 	ReorderDocuments(ctx context.Context, meta RequestMeta, payload DocumentReorderPayload) ([]Document, error)
@@ -45,6 +47,15 @@ type Client interface {
 	GetDocumentVersion(ctx context.Context, meta RequestMeta, docID int64, versionNumber int) (DocumentVersion, error)
 	GetDocumentVersionDiff(ctx context.Context, meta RequestMeta, docID int64, fromVersion, toVersion int) (DocumentVersionDiff, error)
 	RestoreDocumentVersion(ctx context.Context, meta RequestMeta, docID int64, versionNumber int) (Document, error)
+
+	// Asset methods
+	InitMultipartUpload(ctx context.Context, meta RequestMeta, req AssetInitRequest) (AssetInitResponse, error)
+	GetAssetPartURLs(ctx context.Context, meta RequestMeta, assetID int64, partNumbers []int) (AssetPartURLsResponse, error)
+	CompleteMultipartUpload(ctx context.Context, meta RequestMeta, assetID int64, parts []AssetCompletedPart) (Asset, error)
+	AbortMultipartUpload(ctx context.Context, meta RequestMeta, assetID int64) error
+	GetAsset(ctx context.Context, meta RequestMeta, assetID int64) (Asset, error)
+	GetAssetDownloadURL(ctx context.Context, meta RequestMeta, assetID int64) (AssetDownloadURLResponse, error)
+	DeleteAsset(ctx context.Context, meta RequestMeta, assetID int64) error
 }
 
 // NDRConfig describes the minimal configuration required by the client.
@@ -123,6 +134,21 @@ func (c *httpClient) GetNode(ctx context.Context, meta RequestMeta, id int64, op
 		query.Set("include_deleted", fmt.Sprintf("%t", *opts.IncludeDeleted))
 	}
 	req, err := c.newRequestWithQuery(ctx, http.MethodGet, endpoint, meta, nil, query)
+	if err != nil {
+		return Node{}, err
+	}
+	var resp Node
+	_, err = c.do(req, &resp)
+	return resp, err
+}
+
+func (c *httpClient) GetNodeByPath(ctx context.Context, meta RequestMeta, nodePath string, opts GetNodeOptions) (Node, error) {
+	query := url.Values{}
+	query.Set("path", nodePath)
+	if opts.IncludeDeleted != nil {
+		query.Set("include_deleted", fmt.Sprintf("%t", *opts.IncludeDeleted))
+	}
+	req, err := c.newRequestWithQuery(ctx, http.MethodGet, "/api/v1/nodes/by-path", meta, nil, query)
 	if err != nil {
 		return Node{}, err
 	}
@@ -239,6 +265,20 @@ func (c *httpClient) ListDocuments(ctx context.Context, meta RequestMeta, query 
 func (c *httpClient) ListNodeDocuments(ctx context.Context, meta RequestMeta, id int64, query url.Values) (DocumentsPage, error) {
 	endpoint := fmt.Sprintf("/api/v1/nodes/%d/subtree-documents", id)
 	req, err := c.newRequestWithQuery(ctx, http.MethodGet, endpoint, meta, nil, query)
+	if err != nil {
+		return DocumentsPage{}, err
+	}
+	var resp DocumentsPage
+	_, err = c.do(req, &resp)
+	return resp, err
+}
+
+func (c *httpClient) ListNodeDocumentsByPath(ctx context.Context, meta RequestMeta, nodePath string, query url.Values) (DocumentsPage, error) {
+	if query == nil {
+		query = url.Values{}
+	}
+	query.Set("path", nodePath)
+	req, err := c.newRequestWithQuery(ctx, http.MethodGet, "/api/v1/nodes/by-path/subtree-documents", meta, nil, query)
 	if err != nil {
 		return DocumentsPage{}, err
 	}

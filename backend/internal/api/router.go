@@ -20,6 +20,7 @@ type RouterConfig struct {
 	UserHandler    *UserHandler
 	CourseHandler  *CourseHandler
 	APIKeyHandler  *APIKeyHandler
+	AssetsHandler  *AssetsHandler
 	JWTSecret      string
 	DB             *gorm.DB // 用于 API Key 验证
 }
@@ -87,6 +88,15 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 	mux.Handle("/api/v1/documents", authWrap(http.HandlerFunc(cfg.Handler.Documents)))
 	mux.Handle("/api/v1/documents/", authWrap(http.HandlerFunc(cfg.Handler.DocumentRoutes)))
 	mux.Handle("/api/v1/nodes/", authWrap(http.HandlerFunc(cfg.Handler.NodeRoutes)))
+
+	// 路径解析端点（需要认证）
+	mux.Handle("/api/v1/resolve/", authWrap(http.HandlerFunc(cfg.Handler.ResolveRoutes)))
+
+	// Assets 端点（需要认证）
+	if cfg.AssetsHandler != nil {
+		mux.Handle("/api/v1/assets", authWrap(http.HandlerFunc(cfg.AssetsHandler.Assets)))
+		mux.Handle("/api/v1/assets/", authWrap(http.HandlerFunc(cfg.AssetsHandler.AssetRoutes)))
+	}
 
 	return mux
 }
