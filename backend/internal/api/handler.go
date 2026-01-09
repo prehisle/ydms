@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,6 +14,10 @@ import (
 	"github.com/yjxt/ydms/backend/internal/ndrclient"
 	"github.com/yjxt/ydms/backend/internal/service"
 )
+
+// nodePathPattern 验证节点路径格式：小写字母、数字、下划线、短横线，用点分隔
+// 例如: "course", "course.chapter", "course.chapter-1.section_2"
+var nodePathPattern = regexp.MustCompile(`^[a-z0-9_-]+(\.[a-z0-9_-]+)*$`)
 
 // Handler exposes HTTP handlers that delegate to the service layer.
 type Handler struct {
@@ -1036,4 +1041,111 @@ func (h *Handler) getCurrentUser(r *http.Request) (*database.User, error) {
 		return nil, errors.New("user not found in context")
 	}
 	return user, nil
+}
+
+// ResolveRoutes 处理 /api/v1/resolve/* 路由
+func (h *Handler) ResolveRoutes(w http.ResponseWriter, r *http.Request) {
+	meta := h.metaFromRequest(r)
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/resolve")
+
+	switch {
+	case path == "/node" && r.Method == http.MethodGet:
+		h.resolveNode(w, r, meta)
+	case path == "/documents" && r.Method == http.MethodGet:
+		h.resolveDocuments(w, r, meta)
+	case path == "/document" && r.Method == http.MethodGet:
+		h.resolveDocument(w, r, meta)
+	default:
+		respondError(w, http.StatusNotFound, errors.New("not found"))
+	}
+}
+
+// resolveNode 通过路径获取节点
+// GET /api/v1/resolve/node?path=course.chapter
+func (h *Handler) resolveNode(w http.ResponseWriter, r *http.Request, meta service.RequestMeta) {
+	nodePath := r.URL.Query().Get("path")
+	if nodePath == "" {
+		respondError(w, http.StatusBadRequest, errors.New("path parameter is required"))
+		return
+	}
+
+	// 验证路径格式
+	if !nodePathPattern.MatchString(nodePath) {
+		respondError(w, http.StatusBadRequest, errors.New("invalid path format, expected: lowercase letters, numbers, underscores, hyphens, separated by dots"))
+		return
+	}
+
+	cat, err := h.service.GetCategoryByPath(r.Context(), meta, nodePath)
+	if err != nil {
+		respondAPIError(w, WrapUpstreamError(err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, cat)
+}
+
+// resolveDocuments 通过路径获取节点下的文档列表
+// GET /api/v1/resolve/documents?path=course.chapter&type=xxx&metadata.xxx=yyy
+func (h *Handler) resolveDocuments(w http.ResponseWriter, r *http.Request, meta service.RequestMeta) {
+	nodePath := r.URL.Query().Get("path")
+	if nodePath == "" {
+		respondError(w, http.StatusBadRequest, errors.New("path parameter is required"))
+		return
+	}
+
+	// 验证路径格式
+	if !nodePathPattern.MatchString(nodePath) {
+		respondError(w, http.StatusBadRequest, errors.New("invalid path format, expected: lowercase letters, numbers, underscores, hyphens, separated by dots"))
+		return
+	}
+
+	// 复制查询参数（排除 path 参数，因为 NDR 接口会自动处理）
+	query := r.URL.Query()
+
+	docs, err := h.service.ListDocumentsByPath(r.Context(), meta, nodePath, query)
+	if err != nil {
+		respondAPIError(w, WrapUpstreamError(err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, docs)
+}
+
+// resolveDocument 通过文档路径获取单个文档
+// GET /api/v1/resolve/document?path=course.chapter@doc:123
+// path 格式: node_path@doc:document_id 或仅 @doc:document_id
+func (h *Handler) resolveDocument(w http.ResponseWriter, r *http.Request, meta service.RequestMeta) {
+	fullPath := r.URL.Query().Get("path")
+	if fullPath == "" {
+		respondError(w, http.StatusBadRequest, errors.New("path parameter is required"))
+		return
+	}
+
+	// 解析文档路径格式: node_path@doc:document_id 或 @doc:document_id
+	parts := strings.SplitN(fullPath, "@doc:", 2)
+	if len(parts) != 2 {
+		respondError(w, http.StatusBadRequest, errors.New("invalid document path format, expected: node_path@doc:document_id or @doc:document_id"))
+		return
+	}
+
+	// 验证节点路径部分（如果有）
+	nodePath := parts[0]
+	if nodePath != "" && !nodePathPattern.MatchString(nodePath) {
+		respondError(w, http.StatusBadRequest, errors.New("invalid node path format, expected: lowercase letters, numbers, underscores, hyphens, separated by dots"))
+		return
+	}
+
+	docID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, errors.New("invalid document id"))
+		return
+	}
+
+	doc, err := h.service.GetDocument(r.Context(), meta, docID)
+	if err != nil {
+		respondAPIError(w, WrapUpstreamError(err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, doc)
 }

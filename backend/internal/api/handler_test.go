@@ -1163,6 +1163,30 @@ func (f *inMemoryNDR) RestoreDocumentVersion(_ context.Context, meta ndrclient.R
 	return ndrclient.Document{ID: docID}, nil
 }
 
+func (f *inMemoryNDR) GetNodeByPath(_ context.Context, _ ndrclient.RequestMeta, path string, opts ndrclient.GetNodeOptions) (ndrclient.Node, error) {
+	// 通过路径查找节点
+	for _, node := range f.nodes {
+		if node.Path == path {
+			includeDeleted := opts.IncludeDeleted != nil && *opts.IncludeDeleted
+			if node.DeletedAt != nil && !includeDeleted {
+				continue
+			}
+			return node, nil
+		}
+	}
+	return ndrclient.Node{}, fmt.Errorf("node not found by path: %s", path)
+}
+
+func (f *inMemoryNDR) ListNodeDocumentsByPath(ctx context.Context, meta ndrclient.RequestMeta, path string, query url.Values) (ndrclient.DocumentsPage, error) {
+	// 先通过路径找到节点
+	node, err := f.GetNodeByPath(ctx, meta, path, ndrclient.GetNodeOptions{})
+	if err != nil {
+		return ndrclient.DocumentsPage{}, err
+	}
+	// 然后调用 ListNodeDocuments
+	return f.ListNodeDocuments(ctx, meta, node.ID, query)
+}
+
 func (f *inMemoryNDR) composePath(parentID *int64, slug string) string {
 	if parentID == nil {
 		return "/" + slug
@@ -1209,6 +1233,35 @@ func (f *inMemoryNDR) removeChild(parentKey int64, id int64) {
 func (f *inMemoryNDR) tick() time.Time {
 	f.clock++
 	return time.Unix(0, f.clock*int64(time.Millisecond)).UTC()
+}
+
+// Asset methods (stub implementations for interface compliance)
+func (f *inMemoryNDR) InitMultipartUpload(_ context.Context, _ ndrclient.RequestMeta, _ ndrclient.AssetInitRequest) (ndrclient.AssetInitResponse, error) {
+	return ndrclient.AssetInitResponse{}, nil
+}
+
+func (f *inMemoryNDR) GetAssetPartURLs(_ context.Context, _ ndrclient.RequestMeta, _ int64, _ []int) (ndrclient.AssetPartURLsResponse, error) {
+	return ndrclient.AssetPartURLsResponse{}, nil
+}
+
+func (f *inMemoryNDR) CompleteMultipartUpload(_ context.Context, _ ndrclient.RequestMeta, _ int64, _ []ndrclient.AssetCompletedPart) (ndrclient.Asset, error) {
+	return ndrclient.Asset{}, nil
+}
+
+func (f *inMemoryNDR) AbortMultipartUpload(_ context.Context, _ ndrclient.RequestMeta, _ int64) error {
+	return nil
+}
+
+func (f *inMemoryNDR) GetAsset(_ context.Context, _ ndrclient.RequestMeta, _ int64) (ndrclient.Asset, error) {
+	return ndrclient.Asset{}, nil
+}
+
+func (f *inMemoryNDR) GetAssetDownloadURL(_ context.Context, _ ndrclient.RequestMeta, _ int64) (ndrclient.AssetDownloadURLResponse, error) {
+	return ndrclient.AssetDownloadURLResponse{}, nil
+}
+
+func (f *inMemoryNDR) DeleteAsset(_ context.Context, _ ndrclient.RequestMeta, _ int64) error {
+	return nil
 }
 
 func TestListDocumentsIDFilter(t *testing.T) {

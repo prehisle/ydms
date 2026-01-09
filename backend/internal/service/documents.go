@@ -62,6 +62,25 @@ func (s *Service) ListNodeDocuments(ctx context.Context, meta RequestMeta, nodeI
 	return page, nil
 }
 
+// ListDocumentsByPath fetches documents attached to the node subtree by node path.
+func (s *Service) ListDocumentsByPath(ctx context.Context, meta RequestMeta, nodePath string, query url.Values) (ndrclient.DocumentsPage, error) {
+	page, err := s.ndr.ListNodeDocumentsByPath(ctx, toNDRMeta(meta), nodePath, query)
+	if err != nil {
+		return ndrclient.DocumentsPage{}, err
+	}
+
+	ids := extractIDFilter(query)
+	if len(ids) == 0 {
+		return page, nil
+	}
+
+	filtered := filterDocumentsByID(page.Items, ids)
+	page.Items = filtered
+	page.Total = len(filtered)
+	page.Size = len(filtered)
+	return page, nil
+}
+
 // ListDeletedDocuments returns documents that are currently soft-deleted.
 func (s *Service) ListDeletedDocuments(ctx context.Context, meta RequestMeta, query url.Values) (ndrclient.DocumentsPage, error) {
 	if query == nil {

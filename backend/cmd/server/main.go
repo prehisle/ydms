@@ -99,15 +99,17 @@ func runServer() error {
 	apiKeyService := service.NewAPIKeyService(db)
 
 	// 创建 handlers
-	handler := api.NewHandler(svc, permissionService, api.HeaderDefaults{
+	headerDefaults := api.HeaderDefaults{
 		APIKey:   cfg.NDR.APIKey,
 		UserID:   cfg.Auth.DefaultUserID,
 		AdminKey: cfg.Auth.AdminKey,
-	})
+	}
+	handler := api.NewHandler(svc, permissionService, headerDefaults)
 	authHandler := api.NewAuthHandler(userService, cfg.JWT.Secret, jwtExpiry)
 	userHandler := api.NewUserHandler(userService)
 	courseHandler := api.NewCourseHandler(courseService)
 	apiKeyHandler := api.NewAPIKeyHandler(apiKeyService)
+	assetsHandler := api.NewAssetsHandler(svc, headerDefaults)
 
 	// 创建路由器（使用新的配置方式）
 	router := api.NewRouterWithConfig(api.RouterConfig{
@@ -116,6 +118,7 @@ func runServer() error {
 		UserHandler:   userHandler,
 		CourseHandler: courseHandler,
 		APIKeyHandler: apiKeyHandler,
+		AssetsHandler: assetsHandler,
 		JWTSecret:     cfg.JWT.Secret,
 		DB:            db, // 传递 DB 用于 API Key 验证
 	})

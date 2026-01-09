@@ -160,6 +160,16 @@ func (s *Service) GetCategory(ctx context.Context, meta RequestMeta, id int64, i
 	return *category, nil
 }
 
+// GetCategoryByPath returns a single node by its path.
+func (s *Service) GetCategoryByPath(ctx context.Context, meta RequestMeta, path string) (Category, error) {
+	node, err := s.ndr.GetNodeByPath(ctx, toNDRMeta(meta), path, ndrclient.GetNodeOptions{})
+	if err != nil {
+		return Category{}, fmt.Errorf("get node by path: %w", err)
+	}
+	category := mapNode(node, nil)
+	return *category, nil
+}
+
 // CreateCategory creates a new node in NDR.
 func (s *Service) CreateCategory(ctx context.Context, meta RequestMeta, req CategoryCreateRequest) (Category, error) {
 	if strings.TrimSpace(req.Name) == "" {

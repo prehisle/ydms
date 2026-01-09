@@ -311,6 +311,58 @@ func (f *fakeNDR) RestoreDocumentVersion(_ context.Context, meta ndrclient.Reque
 	return ndrclient.Document{ID: docID}, nil
 }
 
+func (f *fakeNDR) GetNodeByPath(_ context.Context, _ ndrclient.RequestMeta, path string, _ ndrclient.GetNodeOptions) (ndrclient.Node, error) {
+	// 通过路径查找节点
+	for _, node := range f.getNodes {
+		if node.Path == path {
+			return node, nil
+		}
+	}
+	return ndrclient.Node{}, errors.New("node not found by path")
+}
+
+func (f *fakeNDR) ListNodeDocumentsByPath(_ context.Context, _ ndrclient.RequestMeta, path string, query url.Values) (ndrclient.DocumentsPage, error) {
+	// 简单实现：返回模拟的文档列表
+	if f.nodeDocsErr != nil {
+		return ndrclient.DocumentsPage{}, f.nodeDocsErr
+	}
+	return ndrclient.DocumentsPage{
+		Page:  1,
+		Size:  100,
+		Total: len(f.nodeDocsResp),
+		Items: f.nodeDocsResp,
+	}, nil
+}
+
+// Asset methods (stub implementations for interface compliance)
+func (f *fakeNDR) InitMultipartUpload(_ context.Context, _ ndrclient.RequestMeta, _ ndrclient.AssetInitRequest) (ndrclient.AssetInitResponse, error) {
+	return ndrclient.AssetInitResponse{}, nil
+}
+
+func (f *fakeNDR) GetAssetPartURLs(_ context.Context, _ ndrclient.RequestMeta, _ int64, _ []int) (ndrclient.AssetPartURLsResponse, error) {
+	return ndrclient.AssetPartURLsResponse{}, nil
+}
+
+func (f *fakeNDR) CompleteMultipartUpload(_ context.Context, _ ndrclient.RequestMeta, _ int64, _ []ndrclient.AssetCompletedPart) (ndrclient.Asset, error) {
+	return ndrclient.Asset{}, nil
+}
+
+func (f *fakeNDR) AbortMultipartUpload(_ context.Context, _ ndrclient.RequestMeta, _ int64) error {
+	return nil
+}
+
+func (f *fakeNDR) GetAsset(_ context.Context, _ ndrclient.RequestMeta, _ int64) (ndrclient.Asset, error) {
+	return ndrclient.Asset{}, nil
+}
+
+func (f *fakeNDR) GetAssetDownloadURL(_ context.Context, _ ndrclient.RequestMeta, _ int64) (ndrclient.AssetDownloadURLResponse, error) {
+	return ndrclient.AssetDownloadURLResponse{}, nil
+}
+
+func (f *fakeNDR) DeleteAsset(_ context.Context, _ ndrclient.RequestMeta, _ int64) error {
+	return nil
+}
+
 func TestCreateCategory(t *testing.T) {
 	fake := newFakeNDR()
 	now := time.Now().UTC()

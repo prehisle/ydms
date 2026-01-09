@@ -19,6 +19,7 @@ import {
   SnippetsOutlined,
   PlusSquareOutlined,
   EditOutlined,
+  LinkOutlined,
 } from "@ant-design/icons";
 
 import type { Category } from "../../../api/categories";
@@ -468,6 +469,23 @@ export function CategoryTreePanel({
       });
     }
 
+    // 复制节点路径 - 所有用户都可以使用
+    const targetNode = lookups.byId.get(nodeId);
+    if (targetNode?.path) {
+      items.push({
+        key: "copy-path",
+        icon: <LinkOutlined />,
+        label: "复制节点路径",
+        onClick: () => {
+          closeContextMenu("action:copy-path");
+          navigator.clipboard.writeText(targetNode.path).then(
+            () => messageApi.success(`已复制路径: ${targetNode.path}`),
+            () => messageApi.error("复制失败")
+          );
+        },
+      });
+    }
+
     if (resolvedSelectionAvailable) {
       if (canManageCategories && resolvedSelectionIds.length === 1) {
         const targetId = resolvedSelectionIds[0];
@@ -626,6 +644,8 @@ export function CategoryTreePanel({
     isDescendantOrSelf,
     isMutating,
     menuDebugEnabled,
+    messageApi,
+    lookups,
     onOpenAddDocument,
     selectedIds,
     selectionParentId,
