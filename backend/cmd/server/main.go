@@ -24,6 +24,7 @@ import (
 	"github.com/yjxt/ydms/backend/internal/config"
 	"github.com/yjxt/ydms/backend/internal/database"
 	"github.com/yjxt/ydms/backend/internal/ndrclient"
+	"github.com/yjxt/ydms/backend/internal/prefectclient"
 	"github.com/yjxt/ydms/backend/internal/service"
 )
 
@@ -98,6 +99,23 @@ func runServer() error {
 	// 创建服务层
 	apiKeyService := service.NewAPIKeyService(db)
 
+	// 创建 Prefect 客户端（如果配置了）
+	var prefect *prefectclient.Client
+	if cfg.Prefect.BaseURL != "" {
+		prefect = prefectclient.NewClient(
+			cfg.Prefect.BaseURL,
+			time.Duration(cfg.Prefect.Timeout)*time.Second,
+		)
+		log.Printf("Prefect client configured: %s", cfg.Prefect.BaseURL)
+	}
+
+	// 创建 Processing 服务
+	pdmsBaseURL := cfg.Prefect.PublicBaseURL
+	if pdmsBaseURL == "" {
+		pdmsBaseURL = fmt.Sprintf("http://localhost:%d", cfg.HTTPPort)
+	}
+	processingService := service.NewProcessingService(db, prefect, ndr, pdmsBaseURL)
+
 	// 创建 handlers
 	headerDefaults := api.HeaderDefaults{
 		APIKey:   cfg.NDR.APIKey,
@@ -110,17 +128,19 @@ func runServer() error {
 	courseHandler := api.NewCourseHandler(courseService)
 	apiKeyHandler := api.NewAPIKeyHandler(apiKeyService)
 	assetsHandler := api.NewAssetsHandler(svc, headerDefaults)
+	processingHandler := api.NewProcessingHandler(processingService, cfg.Prefect.WebhookSecret)
 
 	// 创建路由器（使用新的配置方式）
 	router := api.NewRouterWithConfig(api.RouterConfig{
-		Handler:       handler,
-		AuthHandler:   authHandler,
-		UserHandler:   userHandler,
-		CourseHandler: courseHandler,
-		APIKeyHandler: apiKeyHandler,
-		AssetsHandler: assetsHandler,
-		JWTSecret:     cfg.JWT.Secret,
-		DB:            db, // 传递 DB 用于 API Key 验证
+		Handler:           handler,
+		AuthHandler:       authHandler,
+		UserHandler:       userHandler,
+		CourseHandler:     courseHandler,
+		APIKeyHandler:     apiKeyHandler,
+		AssetsHandler:     assetsHandler,
+		ProcessingHandler: processingHandler,
+		JWTSecret:         cfg.JWT.Secret,
+		DB:                db, // 传递 DB 用于 API Key 验证
 	})
 
 	server := &http.Server{

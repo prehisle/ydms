@@ -48,6 +48,7 @@ import {
 } from "../../../api/documents";
 import type { MetadataValueType } from "../types";
 import { DocumentReferenceModal } from "./DocumentReferenceModal";
+import { AIProcessingButton } from "./AIProcessingButton";
 import {
   useFileUpload,
   formatUploadLink,
@@ -744,6 +745,12 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
             >
               复制路径
             </Button>
+          )}
+          {isEditMode && effectiveDocId && (
+            <AIProcessingButton
+              documentId={effectiveDocId}
+              documentTitle={title}
+            />
           )}
           <Button
             icon={<LinkOutlined />}

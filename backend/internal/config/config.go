@@ -15,6 +15,7 @@ type Config struct {
 	DB       DBConfig
 	JWT      JWTConfig
 	Admin    AdminBootstrapConfig
+	Prefect  PrefectConfig
 }
 
 // NDRConfig stores settings for the upstream NDR service.
@@ -57,6 +58,14 @@ type JWTConfig struct {
 	Expiry string // e.g., "24h", "7d"
 }
 
+// PrefectConfig stores Prefect integration settings.
+type PrefectConfig struct {
+	BaseURL       string // Prefect Server API URL (empty to disable Prefect integration)
+	WebhookSecret string // Secret for callback webhook verification
+	Timeout       int    // Request timeout in seconds
+	PublicBaseURL string // Public URL for callbacks (defaults to http://localhost:{port})
+}
+
 // Load builds a Config object from environment variables, providing sane defaults.
 func Load() Config {
 	return Config{
@@ -88,6 +97,12 @@ func Load() Config {
 			Username:    firstNonEmpty(os.Getenv("YDMS_DEFAULT_ADMIN_USERNAME"), "super_admin"),
 			Password:    firstNonEmpty(os.Getenv("YDMS_DEFAULT_ADMIN_PASSWORD"), "admin123456"),
 			DisplayName: firstNonEmpty(os.Getenv("YDMS_DEFAULT_ADMIN_DISPLAY_NAME"), "超级管理员"),
+		},
+		Prefect: PrefectConfig{
+			BaseURL:       os.Getenv("YDMS_PREFECT_BASE_URL"), // Empty by default (disabled)
+			WebhookSecret: os.Getenv("YDMS_PREFECT_WEBHOOK_SECRET"),
+			Timeout:       parseEnvInt("YDMS_PREFECT_TIMEOUT", 300),
+			PublicBaseURL: os.Getenv("YDMS_PUBLIC_BASE_URL"), // For callback URLs
 		},
 	}
 }

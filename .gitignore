@@ -33,3 +33,4 @@ notebook.md
 
 # OS files
 .DS_Store
+.playwright-mcp/

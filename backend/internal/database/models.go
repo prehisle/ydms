@@ -1,6 +1,9 @@
 package database
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -60,4 +63,74 @@ type APIKey struct {
 // TableName 指定表名
 func (APIKey) TableName() string {
 	return "api_keys"
+}
+
+// ProcessingJob AI 处理任务模型
+type ProcessingJob struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// 文档信息
+	DocumentID      int64  `gorm:"not null;index" json:"document_id"`
+	DocumentVersion int    `gorm:"not null" json:"document_version"`
+	DocumentTitle   string `json:"document_title"`
+
+	// 流水线信息
+	PipelineName   string  `gorm:"not null" json:"pipeline_name"`
+	PipelineParams JSONMap `gorm:"type:jsonb;default:'{}'" json:"pipeline_params"` // JSONB 存储
+
+	// Prefect 集成
+	PrefectDeploymentID string `json:"prefect_deployment_id,omitempty"`
+	PrefectFlowRunID    string `gorm:"index" json:"prefect_flow_run_id,omitempty"`
+
+	// 状态: pending, running, completed, failed, cancelled
+	Status   string `gorm:"not null;default:'pending';index" json:"status"`
+	Progress int    `gorm:"default:0" json:"progress"` // 进度百分比 0-100
+
+	// 结果
+	Result       JSONMap `gorm:"type:jsonb" json:"result,omitempty"` // JSONB 存储处理结果
+	ErrorMessage string  `json:"error_message,omitempty"`            // 失败时的错误信息
+
+	// 幂等性: hash(doc_id + version + pipeline)
+	IdempotencyKey string `gorm:"uniqueIndex" json:"idempotency_key"`
+
+	// 触发者
+	TriggeredByID *uint `gorm:"index" json:"triggered_by_id,omitempty"`
+	TriggeredBy   *User `gorm:"foreignKey:TriggeredByID" json:"triggered_by,omitempty"`
+	DryRun        bool  `gorm:"default:false" json:"dry_run"` // 是否预览模式
+
+	// 时间戳
+	StartedAt   *time.Time `json:"started_at,omitempty"`   // 开始处理时间
+	CompletedAt *time.Time `json:"completed_at,omitempty"` // 完成时间
+}
+
+// TableName 指定表名
+func (ProcessingJob) TableName() string {
+	return "processing_jobs"
+}
+
+// JSONMap is a map[string]interface{} that implements GORM's Scanner and Valuer interfaces
+// for proper JSONB serialization in PostgreSQL.
+type JSONMap map[string]interface{}
+
+// Value implements driver.Valuer for JSONMap
+func (j JSONMap) Value() (driver.Value, error) {
+	if j == nil {
+		return nil, nil
+	}
+	return json.Marshal(j)
+}
+
+// Scan implements sql.Scanner for JSONMap
+func (j *JSONMap) Scan(value interface{}) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New("type assertion to []byte failed")
+	}
+	return json.Unmarshal(bytes, j)
 }

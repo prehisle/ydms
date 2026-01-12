@@ -367,6 +367,76 @@ created_at   TIMESTAMP
 - 首次登录后请立即修改密码
 - 生产环境必须修改所有默认密码
 
+### AI 文档处理系统
+
+YDMS 集成了 IDPP（Intelligent Document Processing Pipeline）用于 AI 辅助文档处理。
+
+#### 架构
+
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│ PDMS 前端   │─────>│ PDMS 后端   │─────>│ Prefect API │
+│ (React)     │      │ (Go:9180)   │      │ (:4200)     │
+└─────────────┘      └─────────────┘      └─────────────┘
+       │                   │                     │
+       │ 轮询状态           │                     ▼
+       │<──────────────────┤              ┌─────────────┐
+       │                   │<─────────────│ IDPP Worker │
+       │                   │   回调        │ (Prefect)   │
+       │                   │              └─────────────┘
+```
+
+#### 可用流水线
+
+1. **generate_knowledge_overview** - 知识点概览生成
+   - 基于文档引用关系，读取源文档内容，调用 LLM 生成 HTML 格式的知识点学习资料
+   - 支持预览模式和执行模式
+
+2. **polish_document** - 文档润色
+   - 使用 LLM 优化文档语言表达和格式
+   - 自动修正语法错误
+
+#### API 端点
+
+- `GET /api/v1/processing/pipelines` - 获取可用流水线列表
+- `POST /api/v1/processing` - 触发流水线
+- `GET /api/v1/processing/jobs?document_id=X` - 获取文档处理历史
+- `GET /api/v1/processing/jobs/{id}` - 获取任务详情
+- `POST /api/v1/processing/callback/{id}` - 回调端点（内部使用）
+
+#### 前端使用
+
+在文档编辑器中，点击工具栏的 "AI 处理" 按钮：
+1. 选择流水线（如"知识点概览生成"）
+2. 选择模式：
+   - **预览模式**：仅生成结果，不保存到文档
+   - **执行模式**：生成结果并保存到文档
+3. 查看处理进度和结果
+
+#### 环境配置
+
+后端需要配置 Prefect 相关环境变量：
+```
+# Prefect 集成（不设置则禁用）
+YDMS_PREFECT_BASE_URL=http://localhost:4200  # Prefect Server API 地址
+YDMS_PREFECT_WEBHOOK_SECRET=your-secret      # Webhook 回调验证密钥
+YDMS_PREFECT_TIMEOUT=300                     # API 请求超时（秒）
+YDMS_PUBLIC_BASE_URL=http://your-host:9180   # 回调公开地址（用于 IDPP 回调 PDMS）
+```
+
+IDPP Worker 需要配置：
+```
+PDMS_WEBHOOK_SECRET=your-secret  # 与 YDMS_PREFECT_WEBHOOK_SECRET 相同
+```
+
+#### 部署流水线
+
+在 IDPP 项目中部署 Prefect Deployments：
+```bash
+cd /home/pi/codes/IDPP
+prefect deploy --all
+```
+
 ### API Key 认证系统
 
 YDMS 支持 API Key 认证，用于外部程序批量管理课程。

@@ -15,14 +15,15 @@ import (
 
 // RouterConfig 路由器配置
 type RouterConfig struct {
-	Handler        *Handler
-	AuthHandler    *AuthHandler
-	UserHandler    *UserHandler
-	CourseHandler  *CourseHandler
-	APIKeyHandler  *APIKeyHandler
-	AssetsHandler  *AssetsHandler
-	JWTSecret      string
-	DB             *gorm.DB // 用于 API Key 验证
+	Handler           *Handler
+	AuthHandler       *AuthHandler
+	UserHandler       *UserHandler
+	CourseHandler     *CourseHandler
+	APIKeyHandler     *APIKeyHandler
+	AssetsHandler     *AssetsHandler
+	ProcessingHandler *ProcessingHandler
+	JWTSecret         string
+	DB                *gorm.DB // 用于 API Key 验证
 }
 
 // NewRouter creates the HTTP router and wires handler endpoints.
@@ -96,6 +97,17 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 	if cfg.AssetsHandler != nil {
 		mux.Handle("/api/v1/assets", authWrap(http.HandlerFunc(cfg.AssetsHandler.Assets)))
 		mux.Handle("/api/v1/assets/", authWrap(http.HandlerFunc(cfg.AssetsHandler.AssetRoutes)))
+	}
+
+	// Processing 端点（AI 处理）
+	if cfg.ProcessingHandler != nil {
+		// 触发和查询端点（需要认证）
+		mux.Handle("/api/v1/processing", authWrap(http.HandlerFunc(cfg.ProcessingHandler.Processing)))
+		mux.Handle("/api/v1/processing/pipelines", authWrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
+		mux.Handle("/api/v1/processing/jobs", authWrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
+		mux.Handle("/api/v1/processing/jobs/", authWrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
+		// Callback 端点（不需要 JWT 认证，由 Webhook Secret 验证）
+		mux.Handle("/api/v1/processing/callback/", wrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
 	}
 
 	return mux
