@@ -183,10 +183,7 @@ func (h *SyncHandler) getDocumentSnapshot(w http.ResponseWriter, r *http.Request
 	// 内部 API 使用 API Key 认证
 	apiKey := r.Header.Get("X-API-Key")
 	if apiKey == "" {
-		apiKey = r.Header.Get("Authorization")
-		if strings.HasPrefix(apiKey, "Bearer ") {
-			apiKey = strings.TrimPrefix(apiKey, "Bearer ")
-		}
+		apiKey = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	}
 
 	if apiKey == "" {

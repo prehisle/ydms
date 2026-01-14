@@ -224,7 +224,7 @@ func (s *SyncService) TriggerSync(
 	deployment, err := s.prefect.GetDeploymentByName(ctx, PipelineSyncToMySQL, deploymentName)
 	if err != nil {
 		// 更新状态为失败（使用条件更新防止覆盖回调结果）
-		s.updateSyncStatusWithCondition(ctx, docID, eventID, SyncStatusFailed, fmt.Sprintf("deployment not found: %s", err.Error()), "")
+		_ = s.updateSyncStatusWithCondition(ctx, docID, eventID, SyncStatusFailed, fmt.Sprintf("deployment not found: %s", err.Error()), "")
 		return nil, fmt.Errorf("failed to find Prefect deployment: %w", err)
 	}
 
@@ -241,12 +241,12 @@ func (s *SyncService) TriggerSync(
 	// 10. 创建 flow run
 	flowRun, err := s.prefect.CreateFlowRun(ctx, deployment.ID, flowParams)
 	if err != nil {
-		s.updateSyncStatusWithCondition(ctx, docID, eventID, SyncStatusFailed, fmt.Sprintf("failed to create flow run: %s", err.Error()), "")
+		_ = s.updateSyncStatusWithCondition(ctx, docID, eventID, SyncStatusFailed, fmt.Sprintf("failed to create flow run: %s", err.Error()), "")
 		return nil, fmt.Errorf("failed to create flow run: %w", err)
 	}
 
 	// 11. 更新 flow run ID（使用条件更新）
-	s.updateSyncStatusWithCondition(ctx, docID, eventID, SyncStatusPending, "", flowRun.ID)
+	_ = s.updateSyncStatusWithCondition(ctx, docID, eventID, SyncStatusPending, "", flowRun.ID)
 
 	return &TriggerSyncResponse{
 		EventID:          eventID,
