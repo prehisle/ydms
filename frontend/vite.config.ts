@@ -3,13 +3,13 @@ import react from "@vitejs/plugin-react";
 
 // 后端 API 地址，支持环境变量覆盖
 // 本地开发: VITE_API_TARGET=http://localhost:9002 npm run dev
-// 默认使用 9180 (生产/测试环境端口)
-const apiTarget = process.env.VITE_API_TARGET || "http://localhost:9180";
+// 默认使用 9002 (统一端口体系)
+const apiTarget = process.env.VITE_API_TARGET || "http://localhost:9002";
 
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 9001,
     open: true,
     host: "0.0.0.0",
     proxy: {

@@ -82,7 +82,7 @@ cd frontend
 # 安装依赖（在修改 lockfile 后）
 npm install
 
-# 在 http://localhost:5173 启动开发服务器
+# 在 http://localhost:9001 启动开发服务器
 npm run dev
 
 # 启用拖拽调试（在浏览器控制台输出 [drag-debug] 日志）
@@ -142,7 +142,7 @@ cd frontend
 # 安装依赖（在修改 lockfile 后）
 npm install
 
-# 在 http://localhost:5173 启动开发服务器
+# 在 http://localhost:9001 启动开发服务器
 npm run dev
 
 # 启用拖拽调试（在浏览器控制台输出 [drag-debug] 日志）
@@ -376,7 +376,7 @@ YDMS 集成了 IDPP（Intelligent Document Processing Pipeline）用于 AI 辅�
 ```
 ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
 │ PDMS 前端   │─────>│ PDMS 后端   │─────>│ Prefect API │
-│ (React)     │      │ (Go:9180)   │      │ (:4200)     │
+│ (React)     │      │ (Go:9002)   │      │ (:4200)     │
 └─────────────┘      └─────────────┘      └─────────────┘
        │                   │                     │
        │ 轮询状态           │                     ▼
@@ -421,7 +421,7 @@ YDMS 集成了 IDPP（Intelligent Document Processing Pipeline）用于 AI 辅�
 YDMS_PREFECT_BASE_URL=http://localhost:4200  # Prefect Server API 地址
 YDMS_PREFECT_WEBHOOK_SECRET=your-secret      # Webhook 回调验证密钥
 YDMS_PREFECT_TIMEOUT=300                     # API 请求超时（秒）
-YDMS_PUBLIC_BASE_URL=http://your-host:9180   # 回调公开地址（用于 IDPP 回调 PDMS）
+YDMS_PUBLIC_BASE_URL=http://your-host:9002   # 回调公开地址（用于 IDPP 回调 PDMS）
 ```
 
 IDPP Worker 需要配置：
@@ -465,19 +465,19 @@ ydms_<environment>_<random-string>
 #### 快速开始
 ```bash
 # 1. 登录获取 JWT token
-TOKEN=$(curl -X POST http://localhost:9180/api/v1/auth/login \
+TOKEN=$(curl -X POST http://localhost:9002/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"super_admin","password":"admin123456"}' | jq -r '.token')
 
 # 2. 创建 API Key
-API_KEY=$(curl -X POST http://localhost:9180/api/v1/api-keys \
+API_KEY=$(curl -X POST http://localhost:9002/api/v1/api-keys \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"批量管理工具","user_id":2,"environment":"prod"}' \
   | jq -r '.api_key')
 
 # 3. 使用 API Key 访问 API
-curl -H "X-API-Key: $API_KEY" http://localhost:9180/api/v1/categories
+curl -H "X-API-Key: $API_KEY" http://localhost:9002/api/v1/categories
 ```
 
 **文档链接**：
@@ -513,7 +513,7 @@ YDMS_JWT_SECRET=your-jwt-secret  # JWT 签名密钥
 
 前端读取 `frontend/.env`：
 ```
-VITE_API_BASE_URL=http://localhost:9180  # API 基础 URL（可选，默认使用 Vite 代理）
+VITE_API_BASE_URL=http://localhost:9002  # API 基础 URL（可选，默认使用 Vite 代理）
 VITE_DEBUG_DRAG=1  # 启用拖拽调试日志
 VITE_DEBUG_MENU=1  # 启用菜单调试模式
 ```
@@ -587,7 +587,7 @@ PR 应包括：
 ### 前端
 - 使用 `VITE_DEBUG_DRAG=1` 进行拖拽诊断，浏览器控制台显示 `[drag-debug]` 日志
 - 使用 `VITE_DEBUG_MENU=1` 启用菜单调试模式
-- 使用 `VITE_API_BASE_URL` 自定义 API 端点（开发时默认通过 Vite 代理到 localhost:9180）
+- 使用 `VITE_API_BASE_URL` 自定义 API 端点（开发时默认通过 Vite 代理到 localhost:9002）
 - React Query DevTools 在开发时可用
 
 ### Docker Compose 问题
@@ -614,7 +614,7 @@ PR 应包括：
 - **检查端口占用**：
   ```bash
   sudo lsof -i :9001   # 前端 HTTP 端口
-  sudo lsof -i :9180   # 后端 API 端口
+  sudo lsof -i :9002   # 后端 API 端口
   sudo lsof -i :5432   # PostgreSQL（如果暴露）
   ```
 - **解决方案**：
@@ -798,26 +798,26 @@ npx playwright show-report
 ### 处理端口冲突
 ```bash
 # 检查端口占用
-lsof -i :9180  # YDMS 后端
-lsof -i :5173  # Vite 前端
-lsof -i :9001  # NDR 服务
+lsof -i :9002  # YDMS 后端
+lsof -i :9001  # Vite 前端
+lsof -i :9000  # NDR 服务
 
 # 终止占用端口的进程
 kill -9 <PID>
 
 # 或使用 fuser
-fuser -k 9180/tcp
+fuser -k 9002/tcp
 ```
 
 ### 使用 API Key 进行批量管理
 ```bash
 # 1. 创建 API Key（需要超级管理员身份）
-TOKEN=$(curl -s -X POST http://localhost:9180/api/v1/auth/login \
+TOKEN=$(curl -s -X POST http://localhost:9002/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"super_admin","password":"admin123456"}' | jq -r '.token')
 
 # 创建课程管理员账号
-USER_ID=$(curl -s -X POST http://localhost:9180/api/v1/users \
+USER_ID=$(curl -s -X POST http://localhost:9002/api/v1/users \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -828,7 +828,7 @@ USER_ID=$(curl -s -X POST http://localhost:9180/api/v1/users \
   }' | jq -r '.id')
 
 # 创建 API Key
-API_KEY=$(curl -s -X POST http://localhost:9180/api/v1/api-keys \
+API_KEY=$(curl -s -X POST http://localhost:9002/api/v1/api-keys \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"批量导入工具\",\"user_id\":$USER_ID,\"environment\":\"prod\"}" \
@@ -838,14 +838,14 @@ echo "API Key: $API_KEY"
 # 保存此密钥！它只会显示一次
 
 # 2. 使用 API Key 批量创建分类
-curl -X POST http://localhost:9180/api/v1/categories \
+curl -X POST http://localhost:9002/api/v1/categories \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"label": "新课程", "parent_id": null}'
 
 # 3. 批量创建文档
 for i in {1..10}; do
-  curl -X POST http://localhost:9180/api/v1/documents \
+  curl -X POST http://localhost:9002/api/v1/documents \
     -H "X-API-Key: $API_KEY" \
     -H "Content-Type: application/json" \
     -d "{
@@ -857,7 +857,7 @@ done
 
 # 4. 查看 API Key 统计
 curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:9180/api/v1/api-keys/stats
+  http://localhost:9002/api/v1/api-keys/stats
 ```
 
 详细的 Python 批量导入示例请参阅 `docs/guides/api-keys.md`。
