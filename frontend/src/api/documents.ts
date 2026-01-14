@@ -388,3 +388,61 @@ export async function getReferencingDocuments(
     `/api/v1/documents/${docId}/referencing${query}`
   );
 }
+
+// Source documents (workflow input)
+export interface SourceDocInfo {
+  id: number;
+  title: string;
+  type?: string | null;
+}
+
+export interface SourceDocument {
+  node_id: number;
+  document_id: number;
+  relation_type: string;
+  document?: SourceDocInfo;
+}
+
+export interface SourceRelation {
+  node_id: number;
+  document_id: number;
+  relation_type: string;
+}
+
+export async function getNodeSourceDocuments(nodeId: number): Promise<SourceDocument[]> {
+  return http<SourceDocument[]>(`/api/v1/nodes/${nodeId}/sources`);
+}
+
+export async function bindSourceDocument(nodeId: number, docId: number): Promise<SourceRelation> {
+  return http<SourceRelation>(`/api/v1/nodes/${nodeId}/sources?document_id=${docId}`, {
+    method: "POST",
+  });
+}
+
+export async function unbindSourceDocument(nodeId: number, docId: number): Promise<void> {
+  await http<void>(`/api/v1/nodes/${nodeId}/sources/${docId}`, {
+    method: "DELETE",
+  });
+}
+
+// Document copy
+export interface DocumentCopyRequest {
+  title?: string;
+  node_id?: number;
+}
+
+export interface DocumentCopyResponse {
+  new_document_id: number;
+  title: string;
+  message: string;
+}
+
+export async function copyDocument(
+  docId: number,
+  payload?: DocumentCopyRequest
+): Promise<DocumentCopyResponse> {
+  return http<DocumentCopyResponse>(`/api/v1/documents/${docId}/copy`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}

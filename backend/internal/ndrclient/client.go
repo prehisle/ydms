@@ -48,6 +48,11 @@ type Client interface {
 	GetDocumentVersionDiff(ctx context.Context, meta RequestMeta, docID int64, fromVersion, toVersion int) (DocumentVersionDiff, error)
 	RestoreDocumentVersion(ctx context.Context, meta RequestMeta, docID int64, versionNumber int) (Document, error)
 
+	// Source document methods (workflow input)
+	BindSourceDocument(ctx context.Context, meta RequestMeta, nodeID, docID int64) (SourceRelation, error)
+	UnbindSourceDocument(ctx context.Context, meta RequestMeta, nodeID, docID int64) error
+	ListSourceDocuments(ctx context.Context, meta RequestMeta, nodeID int64) ([]SourceDocument, error)
+
 	// Asset methods
 	InitMultipartUpload(ctx context.Context, meta RequestMeta, req AssetInitRequest) (AssetInitResponse, error)
 	GetAssetPartURLs(ctx context.Context, meta RequestMeta, assetID int64, partNumbers []int) (AssetPartURLsResponse, error)
@@ -482,6 +487,43 @@ func (c *httpClient) RestoreDocumentVersion(ctx context.Context, meta RequestMet
 		return Document{}, err
 	}
 	var resp Document
+	_, err = c.do(req, &resp)
+	return resp, err
+}
+
+// BindSourceDocument binds a document as a source document to a node.
+func (c *httpClient) BindSourceDocument(ctx context.Context, meta RequestMeta, nodeID, docID int64) (SourceRelation, error) {
+	endpoint := fmt.Sprintf("/api/v1/nodes/%d/sources", nodeID)
+	query := url.Values{}
+	query.Set("document_id", fmt.Sprintf("%d", docID))
+	req, err := c.newRequestWithQuery(ctx, http.MethodPost, endpoint, meta, nil, query)
+	if err != nil {
+		return SourceRelation{}, err
+	}
+	var resp SourceRelation
+	_, err = c.do(req, &resp)
+	return resp, err
+}
+
+// UnbindSourceDocument removes a source document from a node.
+func (c *httpClient) UnbindSourceDocument(ctx context.Context, meta RequestMeta, nodeID, docID int64) error {
+	endpoint := fmt.Sprintf("/api/v1/nodes/%d/sources/%d", nodeID, docID)
+	req, err := c.newRequest(ctx, http.MethodDelete, endpoint, meta, nil)
+	if err != nil {
+		return err
+	}
+	_, err = c.do(req, nil)
+	return err
+}
+
+// ListSourceDocuments lists all source documents for a node.
+func (c *httpClient) ListSourceDocuments(ctx context.Context, meta RequestMeta, nodeID int64) ([]SourceDocument, error) {
+	endpoint := fmt.Sprintf("/api/v1/nodes/%d/sources", nodeID)
+	req, err := c.newRequest(ctx, http.MethodGet, endpoint, meta, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp []SourceDocument
 	_, err = c.do(req, &resp)
 	return resp, err
 }

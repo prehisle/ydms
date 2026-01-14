@@ -138,28 +138,81 @@ func (h *ProcessingHandler) listJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	documentIDStr := r.URL.Query().Get("document_id")
-	if documentIDStr == "" {
-		respondError(w, http.StatusBadRequest, errors.New("document_id is required"))
+	// 获取当前用户
+	currentUser, ok := r.Context().Value(auth.UserContextKey).(*database.User)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, errors.New("unauthorized"))
 		return
 	}
 
-	documentID, err := strconv.ParseInt(documentIDStr, 10, 64)
-	if err != nil {
-		respondError(w, http.StatusBadRequest, errors.New("invalid document_id"))
-		return
+	// 解析查询参数
+	query := r.URL.Query()
+
+	// document_id 参数（可选）
+	var documentID *int64
+	if docIDStr := query.Get("document_id"); docIDStr != "" {
+		id, err := strconv.ParseInt(docIDStr, 10, 64)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, errors.New("invalid document_id"))
+			return
+		}
+		documentID = &id
 	}
 
-	jobs, err := h.service.ListJobs(r.Context(), documentID, 20)
+	// status 参数（可选，逗号分隔）
+	var statusFilter []string
+	if statusStr := query.Get("status"); statusStr != "" {
+		statusFilter = strings.Split(statusStr, ",")
+		// 验证状态值
+		validStatuses := map[string]bool{
+			"pending": true, "running": true, "completed": true, "failed": true, "cancelled": true,
+		}
+		for _, s := range statusFilter {
+			if !validStatuses[s] {
+				respondError(w, http.StatusBadRequest, errors.New("invalid status value: "+s))
+				return
+			}
+		}
+	}
+
+	// limit 参数
+	limit := 20
+	if limitStr := query.Get("limit"); limitStr != "" {
+		l, err := strconv.Atoi(limitStr)
+		if err != nil || l < 1 {
+			respondError(w, http.StatusBadRequest, errors.New("invalid limit"))
+			return
+		}
+		limit = l
+	}
+
+	// offset 参数
+	offset := 0
+	if offsetStr := query.Get("offset"); offsetStr != "" {
+		o, err := strconv.Atoi(offsetStr)
+		if err != nil || o < 0 {
+			respondError(w, http.StatusBadRequest, errors.New("invalid offset"))
+			return
+		}
+		offset = o
+	}
+
+	// 构建查询参数
+	params := service.ListJobsParams{
+		DocumentID: documentID,
+		UserID:     &currentUser.ID, // 只返回当前用户的任务
+		Status:     statusFilter,
+		Limit:      limit,
+		Offset:     offset,
+	}
+
+	result, err := h.service.ListJobsWithParams(r.Context(), params)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"jobs":  jobs,
-		"total": len(jobs),
-	})
+	writeJSON(w, http.StatusOK, result)
 }
 
 // handleCallback handles a callback from IDPP.

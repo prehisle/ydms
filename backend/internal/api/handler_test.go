@@ -1264,6 +1264,19 @@ func (f *inMemoryNDR) DeleteAsset(_ context.Context, _ ndrclient.RequestMeta, _ 
 	return nil
 }
 
+// Source document methods (stub implementations for interface compliance)
+func (f *inMemoryNDR) BindSourceDocument(_ context.Context, _ ndrclient.RequestMeta, nodeID, docID int64) (ndrclient.SourceRelation, error) {
+	return ndrclient.SourceRelation{NodeID: nodeID, DocumentID: docID, RelationType: "source"}, nil
+}
+
+func (f *inMemoryNDR) UnbindSourceDocument(_ context.Context, _ ndrclient.RequestMeta, _, _ int64) error {
+	return nil
+}
+
+func (f *inMemoryNDR) ListSourceDocuments(_ context.Context, _ ndrclient.RequestMeta, _ int64) ([]ndrclient.SourceDocument, error) {
+	return []ndrclient.SourceDocument{}, nil
+}
+
 func TestListDocumentsIDFilter(t *testing.T) {
 	ndr := newInMemoryNDR()
 	svc := service.NewService(cache.NewNoop(), ndr, nil)

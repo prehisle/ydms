@@ -33,6 +33,9 @@ interface UIContextValue {
   userManagementOpen: boolean;
   apiKeyManagementOpen: boolean;
 
+  // 任务中心抽屉
+  taskCenterOpen: boolean;
+
   // Actions - Category
   handleOpenTrash: () => void;
   handleCloseTrash: () => void;
@@ -68,6 +71,10 @@ interface UIContextValue {
   handleCloseUserManagement: () => void;
   handleOpenAPIKeyManagement: () => void;
   handleCloseAPIKeyManagement: () => void;
+
+  // Actions - Task Center
+  handleOpenTaskCenter: () => void;
+  handleCloseTaskCenter: () => void;
 }
 
 const UIContext = createContext<UIContextValue | undefined>(undefined);
@@ -119,6 +126,9 @@ export const UIProvider = ({ children }: UIProviderProps) => {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [userManagementOpen, setUserManagementOpen] = useState(false);
   const [apiKeyManagementOpen, setAPIKeyManagementOpen] = useState(false);
+
+  // 任务中心抽屉
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
 
   // Category Actions
   const handleOpenTrash = useCallback(() => {
@@ -214,6 +224,15 @@ export const UIProvider = ({ children }: UIProviderProps) => {
     setAPIKeyManagementOpen(false);
   }, []);
 
+  // Task Center Actions
+  const handleOpenTaskCenter = useCallback(() => {
+    setTaskCenterOpen(true);
+  }, []);
+
+  const handleCloseTaskCenter = useCallback(() => {
+    setTaskCenterOpen(false);
+  }, []);
+
   const value: UIContextValue = {
     trashModalOpen,
     showCreateModal,
@@ -225,6 +244,7 @@ export const UIProvider = ({ children }: UIProviderProps) => {
     changePasswordOpen,
     userManagementOpen,
     apiKeyManagementOpen,
+    taskCenterOpen,
     handleOpenTrash,
     handleCloseTrash,
     handleOpenCreateModal,
@@ -245,6 +265,8 @@ export const UIProvider = ({ children }: UIProviderProps) => {
     handleCloseUserManagement,
     handleOpenAPIKeyManagement,
     handleCloseAPIKeyManagement,
+    handleOpenTaskCenter,
+    handleCloseTaskCenter,
   };
 
   return <UIContext.Provider value={value}>{children}</UIContext.Provider>;

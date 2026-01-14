@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ type RouterConfig struct {
 	APIKeyHandler     *APIKeyHandler
 	AssetsHandler     *AssetsHandler
 	ProcessingHandler *ProcessingHandler
+	SyncHandler       *SyncHandler
+	WorkflowHandler   *WorkflowHandler
 	JWTSecret         string
 	DB                *gorm.DB // 用于 API Key 验证
 }
@@ -87,8 +90,22 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 	mux.Handle("/api/v1/categories", authWrap(http.HandlerFunc(cfg.Handler.Categories)))
 	mux.Handle("/api/v1/categories/", authWrap(http.HandlerFunc(cfg.Handler.CategoryRoutes)))
 	mux.Handle("/api/v1/documents", authWrap(http.HandlerFunc(cfg.Handler.Documents)))
-	mux.Handle("/api/v1/documents/", authWrap(http.HandlerFunc(cfg.Handler.DocumentRoutes)))
-	mux.Handle("/api/v1/nodes/", authWrap(http.HandlerFunc(cfg.Handler.NodeRoutes)))
+	// 文档路由：如果有 SyncHandler，使用组合处理器
+	if cfg.SyncHandler != nil {
+		mux.Handle("/api/v1/documents/", authWrap(http.HandlerFunc(
+			combineDocumentAndSyncRoutes(cfg.Handler, cfg.SyncHandler),
+		)))
+	} else {
+		mux.Handle("/api/v1/documents/", authWrap(http.HandlerFunc(cfg.Handler.DocumentRoutes)))
+	}
+	// 节点路由：如果有 WorkflowHandler，使用组合处理器
+	if cfg.WorkflowHandler != nil {
+		mux.Handle("/api/v1/nodes/", authWrap(http.HandlerFunc(
+			combineNodeAndWorkflowRoutes(cfg.Handler, cfg.WorkflowHandler),
+		)))
+	} else {
+		mux.Handle("/api/v1/nodes/", authWrap(http.HandlerFunc(cfg.Handler.NodeRoutes)))
+	}
 
 	// 路径解析端点（需要认证）
 	mux.Handle("/api/v1/resolve/", authWrap(http.HandlerFunc(cfg.Handler.ResolveRoutes)))
@@ -108,6 +125,21 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 		mux.Handle("/api/v1/processing/jobs/", authWrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
 		// Callback 端点（不需要 JWT 认证，由 Webhook Secret 验证）
 		mux.Handle("/api/v1/processing/callback/", wrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
+	}
+
+	// Sync 端点（MySQL 同步）
+	if cfg.SyncHandler != nil {
+		// 同步回调端点（不需要 JWT 认证，由 Webhook Secret 验证）
+		mux.Handle("/api/v1/sync/", wrap(http.HandlerFunc(cfg.SyncHandler.SyncRoutes)))
+		// 内部 API（供 IDPP 调用，使用 API Key 认证）
+		mux.Handle("/api/internal/documents/", wrap(http.HandlerFunc(cfg.SyncHandler.InternalDocumentRoutes)))
+	}
+
+	// Workflow 端点（节点工作流）
+	if cfg.WorkflowHandler != nil {
+		// 工作流定义和运行记录（需要认证）
+		mux.Handle("/api/v1/workflows", authWrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))
+		mux.Handle("/api/v1/workflows/", authWrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))
 	}
 
 	return mux
@@ -267,5 +299,77 @@ func requestContextMiddleware(defaultUserID string) func(http.Handler) http.Hand
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+// combineDocumentAndSyncRoutes 组合文档路由和同步路由
+// 根据路径判断是否是同步相关请求，分发到对应的处理器
+func combineDocumentAndSyncRoutes(h *Handler, sh *SyncHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// 检查是否是同步相关路由
+		// /api/v1/documents/{id}/sync (POST)
+		// /api/v1/documents/{id}/sync-status (GET)
+		if strings.HasSuffix(path, "/sync") || strings.HasSuffix(path, "/sync-status") {
+			// 解析文档 ID
+			relPath := strings.TrimPrefix(path, "/api/v1/documents/")
+			parts := strings.Split(relPath, "/")
+			if len(parts) >= 2 {
+				docID, err := strconv.ParseInt(parts[0], 10, 64)
+				if err != nil {
+					respondError(w, http.StatusBadRequest, errors.New("invalid document id"))
+					return
+				}
+				sh.DocumentSyncRoutes(w, r, docID)
+				return
+			}
+		}
+
+		// 其他路由交给原来的文档处理器
+		h.DocumentRoutes(w, r)
+	}
+}
+
+// combineNodeAndWorkflowRoutes 组合节点路由和工作流路由
+// 根据路径判断是否是工作流相关请求，分发到对应的处理器
+func combineNodeAndWorkflowRoutes(h *Handler, wh *WorkflowHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		relPath := strings.TrimPrefix(path, "/api/v1/nodes/")
+
+		// 解析节点 ID
+		parts := strings.Split(relPath, "/")
+		if len(parts) < 2 {
+			h.NodeRoutes(w, r)
+			return
+		}
+
+		nodeID, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, errors.New("invalid node id"))
+			return
+		}
+
+		// 检查是否是工作流相关路由
+		// /api/v1/nodes/{id}/workflows
+		// /api/v1/nodes/{id}/workflows/{workflowKey}/runs
+		// /api/v1/nodes/{id}/workflow-runs
+		if parts[1] == "workflows" {
+			subPath := ""
+			if len(parts) > 2 {
+				subPath = strings.Join(parts[2:], "/")
+			}
+			wh.NodeWorkflowRoutes(w, r, nodeID, subPath)
+			return
+		}
+
+		if parts[1] == "workflow-runs" {
+			wh.NodeWorkflowRoutes(w, r, nodeID, "-runs")
+			return
+		}
+
+		// 其他路由交给原来的节点处理器
+		h.NodeRoutes(w, r)
 	}
 }

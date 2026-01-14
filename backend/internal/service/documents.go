@@ -15,6 +15,12 @@ import (
 	"github.com/yjxt/ydms/backend/internal/ndrclient"
 )
 
+// 文档复制相关的哨兵错误
+var (
+	ErrInvalidNodeID  = errors.New("invalid node_id: must be positive")
+	ErrNoNodeBindings = errors.New("source document has no node bindings, please specify node_id")
+)
+
 // DocumentCreateRequest represents the payload required to create a document.
 type DocumentCreateRequest struct {
 	Title    string         `json:"title"`
@@ -145,6 +151,21 @@ func (s *Service) BindDocument(ctx context.Context, meta RequestMeta, nodeID, do
 // UnbindDocument removes the binding between a node and a document.
 func (s *Service) UnbindDocument(ctx context.Context, meta RequestMeta, nodeID, docID int64) error {
 	return s.ndr.UnbindDocument(ctx, toNDRMeta(meta), nodeID, docID)
+}
+
+// BindSourceDocument associates a document as a source document to a node (workflow input).
+func (s *Service) BindSourceDocument(ctx context.Context, meta RequestMeta, nodeID, docID int64) (ndrclient.SourceRelation, error) {
+	return s.ndr.BindSourceDocument(ctx, toNDRMeta(meta), nodeID, docID)
+}
+
+// UnbindSourceDocument removes a source document from a node.
+func (s *Service) UnbindSourceDocument(ctx context.Context, meta RequestMeta, nodeID, docID int64) error {
+	return s.ndr.UnbindSourceDocument(ctx, toNDRMeta(meta), nodeID, docID)
+}
+
+// ListSourceDocuments lists all source documents for a node.
+func (s *Service) ListSourceDocuments(ctx context.Context, meta RequestMeta, nodeID int64) ([]ndrclient.SourceDocument, error) {
+	return s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), nodeID)
 }
 
 // GetDocument fetches a single document by ID.
@@ -596,6 +617,100 @@ func (s *Service) RemoveDocumentReference(ctx context.Context, meta RequestMeta,
 	}
 	log.Printf("[DEBUG] 更新后文档 metadata: %+v", updatedDoc.Metadata)
 	return updatedDoc, nil
+}
+
+// DocumentCopyRequest represents a request to copy a document.
+type DocumentCopyRequest struct {
+	Title  *string `json:"title,omitempty"` // 新文档标题，默认原标题 + " (副本)"
+	NodeID *int64  `json:"node_id,omitempty"` // 目标节点 ID，默认为原文档所在节点
+}
+
+// DocumentCopyResponse represents the response after copying a document.
+type DocumentCopyResponse struct {
+	NewDocumentID int64  `json:"new_document_id"`
+	Title         string `json:"title"`
+	Message       string `json:"message"`
+}
+
+// CopyDocument creates a copy of an existing document.
+func (s *Service) CopyDocument(ctx context.Context, meta RequestMeta, docID int64, req DocumentCopyRequest) (*DocumentCopyResponse, error) {
+	// 1. Validate input
+	if req.NodeID != nil && *req.NodeID <= 0 {
+		return nil, ErrInvalidNodeID
+	}
+
+	// 2. Get the source document
+	srcDoc, err := s.GetDocument(ctx, meta, docID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source document: %w", err)
+	}
+
+	// 3. Determine the new title
+	newTitle := srcDoc.Title + " (副本)"
+	if req.Title != nil {
+		trimmed := strings.TrimSpace(*req.Title)
+		if trimmed != "" {
+			newTitle = trimmed
+		}
+	}
+
+	// 4. Determine target node ID
+	var targetNodeID int64
+	if req.NodeID != nil {
+		targetNodeID = *req.NodeID
+	} else {
+		// Get the first binding of the source document
+		bindingStatus, err := s.GetDocumentBindingStatus(ctx, meta, docID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get document bindings: %w", err)
+		}
+		if bindingStatus.TotalBindings == 0 || len(bindingStatus.NodeIDs) == 0 {
+			return nil, ErrNoNodeBindings
+		}
+		targetNodeID = bindingStatus.NodeIDs[0]
+	}
+
+	// 5. Deep copy metadata (exclude internal fields)
+	// Using JSON marshal/unmarshal to ensure deep copy of nested structures
+	newMetadata := make(map[string]any)
+	if srcDoc.Metadata != nil {
+		metaBytes, err := json.Marshal(srcDoc.Metadata)
+		if err != nil {
+			log.Printf("[WARN] CopyDocument: failed to marshal source metadata: %v", err)
+		} else if err := json.Unmarshal(metaBytes, &newMetadata); err != nil {
+			log.Printf("[WARN] CopyDocument: failed to unmarshal metadata copy: %v", err)
+		}
+		// Remove fields that should not be inherited
+		delete(newMetadata, "references")
+	}
+
+	// 6. Create the new document
+	createReq := DocumentCreateRequest{
+		Title:    newTitle,
+		Content:  srcDoc.Content,
+		Metadata: newMetadata,
+		Type:     srcDoc.Type,
+	}
+
+	newDoc, err := s.CreateDocument(ctx, meta, createReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create document copy: %w", err)
+	}
+
+	// 7. Bind to target node
+	if err := s.BindDocument(ctx, meta, targetNodeID, newDoc.ID); err != nil {
+		// Try to clean up the created document
+		if cleanupErr := s.DeleteDocument(ctx, meta, newDoc.ID); cleanupErr != nil {
+			log.Printf("[WARN] CopyDocument: failed to cleanup orphan document %d after bind failure: %v", newDoc.ID, cleanupErr)
+		}
+		return nil, fmt.Errorf("failed to bind document to node: %w", err)
+	}
+
+	return &DocumentCopyResponse{
+		NewDocumentID: newDoc.ID,
+		Title:         newDoc.Title,
+		Message:       "文档复制成功",
+	}, nil
 }
 
 // GetReferencingDocuments finds all documents that reference the given document.

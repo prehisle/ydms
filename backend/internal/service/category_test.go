@@ -363,6 +363,19 @@ func (f *fakeNDR) DeleteAsset(_ context.Context, _ ndrclient.RequestMeta, _ int6
 	return nil
 }
 
+// Source document methods (stub implementations for interface compliance)
+func (f *fakeNDR) BindSourceDocument(_ context.Context, _ ndrclient.RequestMeta, nodeID, docID int64) (ndrclient.SourceRelation, error) {
+	return ndrclient.SourceRelation{NodeID: nodeID, DocumentID: docID, RelationType: "source"}, nil
+}
+
+func (f *fakeNDR) UnbindSourceDocument(_ context.Context, _ ndrclient.RequestMeta, _, _ int64) error {
+	return nil
+}
+
+func (f *fakeNDR) ListSourceDocuments(_ context.Context, _ ndrclient.RequestMeta, _ int64) ([]ndrclient.SourceDocument, error) {
+	return []ndrclient.SourceDocument{}, nil
+}
+
 func TestCreateCategory(t *testing.T) {
 	fake := newFakeNDR()
 	now := time.Now().UTC()

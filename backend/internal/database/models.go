@@ -110,6 +110,26 @@ func (ProcessingJob) TableName() string {
 	return "processing_jobs"
 }
 
+// DocSyncStatus 文档同步状态模型
+// 记录文档到外部 MySQL 数据库的同步状态
+type DocSyncStatus struct {
+	ID           uint       `gorm:"primarykey" json:"id"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	DocumentID   int64      `gorm:"not null;uniqueIndex" json:"document_id"`                    // NDR 文档 ID
+	LastEventID  string     `gorm:"size:64;not null;default:''" json:"last_event_id,omitempty"` // 最后同步事件 ID
+	LastVersion  int        `gorm:"not null;default:0" json:"last_version"`                     // 最后同步的文档版本
+	LastStatus   string     `gorm:"size:32;not null;index;default:'pending'" json:"last_status"` // pending, success, failed, skipped
+	LastError    string     `gorm:"type:text" json:"last_error,omitempty"`                      // 失败时的错误信息（可能较长）
+	LastRunID    string     `gorm:"size:64" json:"last_run_id,omitempty"`                       // Prefect flow run ID
+	LastSyncedAt *time.Time `json:"last_synced_at,omitempty"`                                   // 最后成功同步时间
+}
+
+// TableName 指定表名（与其他表保持复数形式一致）
+func (DocSyncStatus) TableName() string {
+	return "doc_sync_statuses"
+}
+
 // JSONMap is a map[string]interface{} that implements GORM's Scanner and Valuer interfaces
 // for proper JSONB serialization in PostgreSQL.
 type JSONMap map[string]interface{}
@@ -133,4 +153,73 @@ func (j *JSONMap) Scan(value interface{}) error {
 		return errors.New("type assertion to []byte failed")
 	}
 	return json.Unmarshal(bytes, j)
+}
+
+// WorkflowDefinition 工作流定义模型
+// 定义可在节点上运行的工作流类型
+type WorkflowDefinition struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// 工作流标识
+	WorkflowKey string `gorm:"uniqueIndex;not null;size:64" json:"workflow_key"` // 如 generate_overview, generate_exercises
+
+	// 展示信息
+	Name        string `gorm:"not null;size:128" json:"name"`        // 显示名称
+	Description string `gorm:"type:text" json:"description"`         // 描述
+
+	// Prefect 集成
+	PrefectDeploymentName string `gorm:"not null;size:128" json:"prefect_deployment_name"` // Prefect deployment 名称
+
+	// 参数配置
+	ParameterSchema JSONMap `gorm:"type:jsonb;default:'{}'" json:"parameter_schema"` // JSON Schema，用于前端动态表单
+
+	// 状态
+	Enabled bool `gorm:"default:true" json:"enabled"` // 是否启用
+}
+
+// TableName 指定表名
+func (WorkflowDefinition) TableName() string {
+	return "workflow_definitions"
+}
+
+// WorkflowRun 工作流运行记录模型
+// 记录每次工作流运行的状态和结果
+type WorkflowRun struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// 工作流信息
+	WorkflowKey string `gorm:"not null;size:64;index" json:"workflow_key"` // 关联的工作流定义
+
+	// 节点信息
+	NodeID int64 `gorm:"not null;index" json:"node_id"` // 运行的节点 ID
+
+	// 运行参数
+	Parameters JSONMap `gorm:"type:jsonb;default:'{}'" json:"parameters"` // 运行时传入的参数
+
+	// 状态: pending, running, success, failed, cancelled
+	Status string `gorm:"not null;default:'pending';size:32;index" json:"status"`
+
+	// Prefect 集成
+	PrefectFlowRunID string `gorm:"size:64;index" json:"prefect_flow_run_id,omitempty"`
+
+	// 结果
+	Result       JSONMap `gorm:"type:jsonb" json:"result,omitempty"`     // 运行结果
+	ErrorMessage string  `gorm:"type:text" json:"error_message,omitempty"` // 错误信息
+
+	// 触发者
+	CreatedByID *uint `gorm:"index" json:"created_by_id,omitempty"`
+	CreatedBy   *User `gorm:"foreignKey:CreatedByID" json:"created_by,omitempty"`
+
+	// 时间戳
+	StartedAt  *time.Time `json:"started_at,omitempty"`  // 开始时间
+	FinishedAt *time.Time `json:"finished_at,omitempty"` // 完成时间
+}
+
+// TableName 指定表名
+func (WorkflowRun) TableName() string {
+	return "workflow_runs"
 }

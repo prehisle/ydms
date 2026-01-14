@@ -118,8 +118,25 @@ export const AIProcessingButton: FC<AIProcessingButtonProps> = ({
     mutationFn: (request: TriggerPipelineRequest) => triggerPipeline(request),
     onSuccess: (response) => {
       setCurrentJobId(response.job_id);
-      setProgressModalOpen(true);
-      message.info("AI 处理任务已提交");
+      // 非阻塞提示：用户可以选择查看进度或继续工作
+      message.success({
+        content: (
+          <span>
+            任务已提交，可在
+            <a
+              onClick={() => {
+                setProgressModalOpen(true);
+                message.destroy();
+              }}
+              style={{ marginLeft: 4, marginRight: 4 }}
+            >
+              查看进度
+            </a>
+            或在任务中心查看所有任务
+          </span>
+        ),
+        duration: 5,
+      });
     },
     onError: (error: Error) => {
       message.error(`提交失败: ${error.message}`);

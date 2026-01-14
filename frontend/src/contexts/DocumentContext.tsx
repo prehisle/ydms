@@ -6,6 +6,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useMemo,
   ReactNode,
 } from "react";
 import type { MessageInstance } from "antd/es/message/interface";
@@ -17,6 +18,7 @@ import {
   DocumentTrashParams,
   MetadataFilterClause,
   getNodeDocuments,
+  getNodeSourceDocuments,
   deleteDocument,
   restoreDocument,
   purgeDocument,
@@ -125,6 +127,17 @@ const [documentTrashParams, setDocumentTrashParams] = useState<DocumentTrashPara
   // 历史记录状态
   const [documentHistoryParams, setDocumentHistoryParams] = useState({ page: 1, size: 10 });
   const [documentHistoryDocId, setDocumentHistoryDocId] = useState<number | null>(null);
+
+  // 源文档查询（用于过滤产出文档）
+  const sourceDocsQuery = useQuery({
+    queryKey: ["node-source-docs", selectedNodeId],
+    queryFn: async () => {
+      if (selectedNodeId == null) return [];
+      return getNodeSourceDocuments(selectedNodeId);
+    },
+    enabled: selectedNodeId != null,
+    staleTime: 30_000,
+  });
 
   // 文档列表查询
   const documentsQuery = useQuery({
@@ -371,7 +384,13 @@ const [documentTrashParams, setDocumentTrashParams] = useState<DocumentTrashPara
     ? { page: 1, size: 10, total: 0, items: [] }
     : documentsQuery.data ?? { page: 1, size: 10, total: 0, items: [] };
 
-  const documents = documentsPage.items;
+  // 过滤掉源文档，只保留产出文档
+  const documents = useMemo(() => {
+    const sourceDocIds = new Set(
+      (sourceDocsQuery.data ?? []).map(s => s.document_id)
+    );
+    return documentsPage.items.filter(doc => !sourceDocIds.has(doc.id));
+  }, [documentsPage.items, sourceDocsQuery.data]);
   const deletingDocId = deleteDocumentMutation.isPending
     ? deleteDocumentMutation.variables ?? null
     : null;

@@ -1,7 +1,7 @@
 import { FileTextOutlined, FolderOpenOutlined, FolderOutlined } from "@ant-design/icons";
-import { Input, List, message, Modal, Spin, Tree, Typography, Empty } from "antd";
+import { Button, Checkbox, Input, List, message, Modal, Space, Spin, Tree, Typography, Empty } from "antd";
 import type { DataNode } from "antd/es/tree";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getCategoryTree, type Category } from "../../../api/categories";
 import { getNodeDocuments, type Document } from "../../../api/documents";
 
@@ -11,7 +11,9 @@ const { Text } = Typography;
 interface DocumentTreeSelectorProps {
   open: boolean;
   onCancel: () => void;
-  onSelect: (document: Document) => void;
+  onSelect?: (document: Document) => void;  // 单选回调（保持兼容）
+  onSelectMultiple?: (documents: Document[]) => void;  // 多选回调
+  selectionMode?: "single" | "multiple";  // 选择模式，默认 single
   excludeDocIds?: number[]; // 要排除的文档 ID（如当前编辑的文档和已引用的文档）
   title?: string;
 }
@@ -20,6 +22,8 @@ export function DocumentTreeSelector({
   open,
   onCancel,
   onSelect,
+  onSelectMultiple,
+  selectionMode = "single",
   excludeDocIds = [],
   title = "选择文档",
 }: DocumentTreeSelectorProps) {
@@ -30,12 +34,15 @@ export function DocumentTreeSelector({
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [searchValue, setSearchValue] = useState("");
+  // 多选模式下的已选文档（使用 Map 保持跨分类选择）
+  const [selectedDocs, setSelectedDocs] = useState<Map<number, Document>>(new Map());
 
   useEffect(() => {
     if (open) {
       loadCategoryTree();
       setSelectedNodeId(null);
       setDocuments([]);
+      setSelectedDocs(new Map());  // 打开时清空已选
     }
   }, [open]);
 
@@ -134,20 +141,55 @@ export function DocumentTreeSelector({
   };
 
   const handleDocumentClick = (doc: Document) => {
-    onSelect(doc);
+    if (selectionMode === "multiple") {
+      // 多选模式：toggle 选中状态
+      setSelectedDocs((prev) => {
+        const newMap = new Map(prev);
+        if (newMap.has(doc.id)) {
+          newMap.delete(doc.id);
+        } else {
+          newMap.set(doc.id, doc);
+        }
+        return newMap;
+      });
+    } else {
+      // 单选模式：直接选择并关闭
+      onSelect?.(doc);
+    }
   };
+
+  // 多选模式下的确认按钮处理
+  const handleConfirm = useCallback(() => {
+    if (selectionMode === "multiple" && onSelectMultiple) {
+      onSelectMultiple(Array.from(selectedDocs.values()));
+    }
+  }, [selectionMode, onSelectMultiple, selectedDocs]);
 
   const handleSearch = (value: string) => {
     setSearchValue(value);
     // TODO: 实现搜索过滤逻辑
   };
 
+  // 多选模式下的 footer
+  const modalFooter = selectionMode === "multiple" ? (
+    <Space>
+      <Button onClick={onCancel}>取消</Button>
+      <Button
+        type="primary"
+        disabled={selectedDocs.size === 0}
+        onClick={handleConfirm}
+      >
+        确认关联 ({selectedDocs.size})
+      </Button>
+    </Space>
+  ) : null;
+
   return (
     <Modal
       title={title}
       open={open}
       onCancel={onCancel}
-      footer={null}
+      footer={modalFooter}
       width={900}
       styles={{ body: { padding: "16px 0", height: "70vh" } }}
     >
@@ -210,28 +252,45 @@ export function DocumentTreeSelector({
             ) : (
               <List
                 dataSource={documents}
-                renderItem={(doc) => (
-                  <List.Item
-                    style={{ cursor: "pointer", padding: "12px 16px" }}
-                    onClick={() => handleDocumentClick(doc)}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = "#f5f5f5";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = "transparent";
-                    }}
-                  >
-                    <List.Item.Meta
-                      avatar={<FileTextOutlined style={{ fontSize: 16, color: "#1890ff" }} />}
-                      title={<Text>{doc.title}</Text>}
-                      description={
-                        <Text type="secondary" style={{ fontSize: "12px" }}>
-                          ID: {doc.id} | 类型: {doc.type}
-                        </Text>
-                      }
-                    />
-                  </List.Item>
-                )}
+                renderItem={(doc) => {
+                  const isSelected = selectedDocs.has(doc.id);
+                  return (
+                    <List.Item
+                      style={{
+                        cursor: "pointer",
+                        padding: "12px 16px",
+                        backgroundColor: isSelected ? "#e6f4ff" : "transparent",
+                      }}
+                      onClick={() => handleDocumentClick(doc)}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) {
+                          e.currentTarget.style.backgroundColor = "#f5f5f5";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = isSelected ? "#e6f4ff" : "transparent";
+                      }}
+                    >
+                      {selectionMode === "multiple" && (
+                        <Checkbox
+                          checked={isSelected}
+                          style={{ marginRight: 12 }}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => handleDocumentClick(doc)}
+                        />
+                      )}
+                      <List.Item.Meta
+                        avatar={<FileTextOutlined style={{ fontSize: 16, color: "#1890ff" }} />}
+                        title={<Text>{doc.title}</Text>}
+                        description={
+                          <Text type="secondary" style={{ fontSize: "12px" }}>
+                            ID: {doc.id} | 类型: {doc.type}
+                          </Text>
+                        }
+                      />
+                    </List.Item>
+                  );
+                }}
                 bordered
               />
             )}

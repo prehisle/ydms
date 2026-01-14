@@ -20,6 +20,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useState,
   type ComponentProps,
   type CSSProperties,
   type ReactNode,
@@ -27,6 +28,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   HistoryOutlined,
@@ -36,6 +38,7 @@ import {
   MenuUnfoldOutlined,
   RollbackOutlined,
   TeamOutlined,
+  UnorderedListOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import type { Category } from "./api/categories";
@@ -46,7 +49,8 @@ import { UIProvider, useUIContext } from "./contexts/UIContext";
 import { ChangePasswordModal } from "./features/auth";
 import { UserManagementDrawer } from "./features/users/UserManagementDrawer";
 import { APIKeyManagementDrawer } from "./features/apikeys/APIKeyManagementDrawer";
-import { Document, DocumentTrashPage, DocumentVersionsPage } from "./api/documents";
+import { TaskCenterDrawer } from "./features/tasks";
+import { Document, DocumentTrashPage, DocumentVersionsPage, copyDocument } from "./api/documents";
 import { CategoryTreePanel } from "./features/categories/components/CategoryTreePanel";
 import type { CategoryTreePanelProps } from "./features/categories/components/CategoryTreePanel";
 import { CategoryBreadcrumb } from "./features/categories/components/CategoryBreadcrumb";
@@ -59,6 +63,8 @@ import { DOCUMENT_TYPES } from "./features/documents/constants";
 import { DocumentHistoryDrawer } from "./features/documents/components/DocumentHistoryDrawer";
 import { DocumentTrashDrawer } from "./features/documents/components/DocumentTrashDrawer";
 import { DocumentReorderModal } from "./features/documents/components/DocumentReorderModal";
+import { SourceDocumentManager } from "./features/documents/components/SourceDocumentManager";
+import { WorkflowManager } from "./features/workflows";
 import { StatusBar } from "./components/StatusBar";
 import { useDocumentDrag } from "./features/documents/hooks/useDocumentDrag";
 import { usePersistentBoolean } from "./hooks/usePersistentBoolean";
@@ -241,6 +247,7 @@ const AppContent = () => {
     changePasswordOpen,
     userManagementOpen,
     apiKeyManagementOpen,
+    taskCenterOpen,
     handleOpenTrash,
     handleCloseTrash,
     handleOpenCreateModal,
@@ -261,6 +268,8 @@ const AppContent = () => {
     handleCloseUserManagement,
     handleOpenAPIKeyManagement,
     handleCloseAPIKeyManagement,
+    handleOpenTaskCenter,
+    handleCloseTaskCenter,
   } = useUIContext();
 
   // 刷新分类和文档查询
@@ -479,6 +488,29 @@ const AppContent = () => {
     [handleOpenDocumentHistory, setDocumentHistoryDocId],
   );
 
+  // 文档复制状态
+  const [copyingDocId, setCopyingDocId] = useState<number | null>(null);
+
+  const handleCopyDocument = useCallback(
+    async (doc: Document) => {
+      setCopyingDocId(doc.id);
+      try {
+        // 传递当前选中的节点 ID，确保副本出现在当前列表中
+        const result = await copyDocument(doc.id, {
+          node_id: selectedNodeId ?? undefined,
+        });
+        messageApi.success(`文档已复制：${result.title}`);
+        await queryClient.invalidateQueries({ queryKey: ["node-documents"] });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "复制文档失败";
+        messageApi.error(msg);
+      } finally {
+        setCopyingDocId(null);
+      }
+    },
+    [messageApi, queryClient, selectedNodeId],
+  );
+
   const handleCloseDocumentHistoryWrapper = useCallback(() => {
     setDocumentHistoryDocId(null);
     handleCloseDocumentHistory();
@@ -605,9 +637,10 @@ const AppContent = () => {
       {
         title: "操作",
         key: "actions",
-        width: 200,
+        width: 240,
         render: (_: unknown, record: Document) => {
           const deleting = deletingDocId === record.id;
+          const copying = copyingDocId === record.id;
           return (
             <Space>
               <Tooltip title="编辑文档">
@@ -620,19 +653,31 @@ const AppContent = () => {
                 />
               </Tooltip>
               {user?.role !== "proofreader" && (
-                <Tooltip title="删除文档">
-                  <span style={{ display: "inline-flex" }}>
+                <>
+                  <Tooltip title="复制文档">
                     <Button
-                      icon={<DeleteOutlined />}
+                      icon={<CopyOutlined />}
                       type="text"
-                      danger
                       shape="circle"
-                      loading={deleteDocumentMutation.isPending && deleting}
-                      onClick={() => handleSoftDeleteDocument(record)}
-                      aria-label="删除文档"
+                      loading={copying}
+                      onClick={() => handleCopyDocument(record)}
+                      aria-label="复制文档"
                     />
-                  </span>
-                </Tooltip>
+                  </Tooltip>
+                  <Tooltip title="删除文档">
+                    <span style={{ display: "inline-flex" }}>
+                      <Button
+                        icon={<DeleteOutlined />}
+                        type="text"
+                        danger
+                        shape="circle"
+                        loading={deleteDocumentMutation.isPending && deleting}
+                        onClick={() => handleSoftDeleteDocument(record)}
+                        aria-label="删除文档"
+                      />
+                    </span>
+                  </Tooltip>
+                </>
               )}
               <Tooltip title="历史版本">
                 <Button
@@ -652,7 +697,9 @@ const AppContent = () => {
       user,
       deleteDocumentMutation.isPending,
       deletingDocId,
+      copyingDocId,
       handleEditDocument,
+      handleCopyDocument,
       handleOpenDocHistoryWrapper,
       handleSoftDeleteDocument,
     ],
@@ -765,6 +812,14 @@ const AppContent = () => {
       disabled: true,
     },
     { type: "divider" },
+    {
+      key: "task-center",
+      label: "任务中心",
+      icon: <UnorderedListOutlined />,
+      onClick: () => {
+        handleOpenTaskCenter();
+      },
+    },
     ...(canManageUsers
       ? [
           {
@@ -839,7 +894,14 @@ const AppContent = () => {
           <CategoryTreePanel {...treePanelProps} />
         </TreeSider>
         <Content style={CONTENT_STYLE}>
-          <DocumentContentSection breadcrumb={breadcrumbProps} panel={documentPanelProps} />
+          <DocumentContentSection
+            breadcrumb={breadcrumbProps}
+            panel={documentPanelProps}
+            sourceManager={{
+              nodeId: selectedNodeId,
+              canEdit: user?.role !== "proofreader",
+            }}
+          />
         </Content>
       </Layout>
       <Footer style={{ padding: 0 }}>
@@ -1014,6 +1076,7 @@ const AppContent = () => {
       <ChangePasswordModal open={changePasswordOpen} onClose={handleCloseChangePassword} />
       <UserManagementDrawer open={userManagementOpen} onClose={handleCloseUserManagement} />
       <APIKeyManagementDrawer open={apiKeyManagementOpen} onClose={handleCloseAPIKeyManagement} />
+      <TaskCenterDrawer open={taskCenterOpen} onClose={handleCloseTaskCenter} />
     </Layout>
   );
 };
@@ -1086,14 +1149,41 @@ const TreeSider = ({ state, collapsedWidth, baseStyle, children }: TreeSiderProp
 interface DocumentContentSectionProps {
   breadcrumb: CategoryBreadcrumbProps;
   panel: ComponentProps<typeof DocumentPanel>;
+  sourceManager?: {
+    nodeId: number | null;
+    canEdit: boolean;
+  };
 }
 
-const DocumentContentSection = ({ breadcrumb, panel }: DocumentContentSectionProps) => (
-  <Space direction="vertical" size="large" style={DOCUMENT_STACK_STYLE}>
-    <CategoryBreadcrumb {...breadcrumb} />
-    <DocumentPanel {...panel} />
-  </Space>
-);
+const DocumentContentSection = ({ breadcrumb, panel, sourceManager }: DocumentContentSectionProps) => {
+  // 当源文档变化时，通过 key 强制刷新 WorkflowManager
+  const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0);
+
+  const handleSourcesChanged = useCallback(() => {
+    setWorkflowRefreshKey(prev => prev + 1);
+  }, []);
+
+  return (
+    <Space direction="vertical" size="large" style={DOCUMENT_STACK_STYLE}>
+      <CategoryBreadcrumb {...breadcrumb} />
+      {sourceManager?.nodeId != null && (
+        <>
+          <SourceDocumentManager
+            nodeId={sourceManager.nodeId}
+            canEdit={sourceManager.canEdit}
+            onSourcesChanged={handleSourcesChanged}
+          />
+          <WorkflowManager
+            key={workflowRefreshKey}
+            nodeId={sourceManager.nodeId}
+            canEdit={sourceManager.canEdit}
+          />
+        </>
+      )}
+      <DocumentPanel {...panel} />
+    </Space>
+  );
+};
 
 const AppWithProviders = () => {
   const [messageApi, contextHolder] = message.useMessage();

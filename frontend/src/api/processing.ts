@@ -53,6 +53,21 @@ export interface ProcessingJobsResponse {
   total: number;
 }
 
+// 增强版任务列表响应
+export interface ListJobsResponse {
+  jobs: ProcessingJob[];
+  total: number;
+  has_more: boolean;
+}
+
+// 任务列表查询参数
+export interface ListJobsParams {
+  document_id?: number;
+  status?: string; // 逗号分隔的状态列表，如 "running,pending"
+  limit?: number;
+  offset?: number;
+}
+
 // 流水线列表响应
 export interface PipelinesResponse {
   pipelines: Pipeline[];
@@ -84,6 +99,19 @@ export async function getDocumentProcessingJobs(
 ): Promise<ProcessingJobsResponse> {
   const query = buildQuery({ document_id: documentId });
   return http<ProcessingJobsResponse>(`/api/v1/processing/jobs${query}`);
+}
+
+// 获取任务列表（支持分页、状态过滤）
+export async function listProcessingJobs(
+  params: ListJobsParams = {}
+): Promise<ListJobsResponse> {
+  const query = buildQuery({
+    document_id: params.document_id,
+    status: params.status,
+    limit: params.limit,
+    offset: params.offset,
+  });
+  return http<ListJobsResponse>(`/api/v1/processing/jobs${query}`);
 }
 
 // 轮询任务状态（带超时）

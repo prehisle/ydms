@@ -49,6 +49,7 @@ import {
 import type { MetadataValueType } from "../types";
 import { DocumentReferenceModal } from "./DocumentReferenceModal";
 import { AIProcessingButton } from "./AIProcessingButton";
+import { SyncButton } from "./SyncButton";
 import {
   useFileUpload,
   formatUploadLink,
@@ -751,6 +752,9 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
               documentId={effectiveDocId}
               documentTitle={title}
             />
+          )}
+          {isEditMode && effectiveDocId && (
+            <SyncButton documentId={effectiveDocId} />
           )}
           <Button
             icon={<LinkOutlined />}

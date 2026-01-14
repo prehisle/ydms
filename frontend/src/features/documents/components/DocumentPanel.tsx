@@ -19,9 +19,9 @@ import type { FormInstance } from "antd/es/form";
 import {
   PlusOutlined,
   SearchOutlined,
-  FileTextOutlined,
   SortAscendingOutlined,
   MinusCircleOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 
 import type { Document, MetadataOperator } from "../../../api/documents";
@@ -167,8 +167,8 @@ export const DocumentPanel: FC<DocumentPanelProps> = ({
       <Card
         title={
           <Space>
-            <FileTextOutlined />
-            <span>文档列表</span>
+            <UploadOutlined />
+            <span>产出文档</span>
           </Space>
         }
         extra={

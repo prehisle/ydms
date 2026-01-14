@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -234,6 +235,12 @@ func (h *Handler) DocumentRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if parts[1] == "copy" {
+		// POST /api/v1/documents/{id}/copy - copy document
+		h.copyDocument(w, r, meta, id)
+		return
+	}
+
 	// Handle reference-related routes
 	if parts[1] == "references" {
 		if len(parts) == 2 {
@@ -384,6 +391,68 @@ func (h *Handler) getDocumentBindingStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (h *Handler) copyDocument(w http.ResponseWriter, r *http.Request, meta service.RequestMeta, id int64) {
+	if r.Method != http.MethodPost {
+		respondError(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
+		return
+	}
+
+	// 权限检查：校对员不能复制文档
+	_, httpErr := h.requireNotProofreader(r, "copy documents")
+	if httpErr != nil {
+		respondError(w, httpErr.code, httpErr.message)
+		return
+	}
+
+	var req service.DocumentCopyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "请求格式错误", err.Error()))
+		return
+	}
+
+	resp, err := h.service.CopyDocument(r.Context(), meta, id, req)
+	if err != nil {
+		// 使用 errors.Is 检查哨兵错误（业务校验错误）
+		switch {
+		case errors.Is(err, service.ErrInvalidNodeID):
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "无效的节点ID", err.Error()))
+			return
+		case errors.Is(err, service.ErrNoNodeBindings):
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "源文档未绑定到任何节点", "请指定目标节点ID"))
+			return
+		}
+
+		// 使用 errors.As 检查 NDR 错误，按状态码映射
+		var ndrErr *ndrclient.Error
+		if errors.As(err, &ndrErr) {
+			switch ndrErr.StatusCode {
+			case http.StatusNotFound:
+				// 根据错误消息判断是源文档还是目标节点不存在
+				errMsg := err.Error()
+				if strings.Contains(errMsg, "source document") {
+					respondAPIError(w, NewAPIError(ErrCodeNotFound, http.StatusNotFound, "源文档不存在", errMsg))
+				} else if strings.Contains(errMsg, "bind document") {
+					respondAPIError(w, NewAPIError(ErrCodeNotFound, http.StatusNotFound, "目标节点不存在", errMsg))
+				} else {
+					respondAPIError(w, NewAPIError(ErrCodeNotFound, http.StatusNotFound, "资源不存在", errMsg))
+				}
+				return
+			case http.StatusBadRequest:
+				respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "请求参数错误", err.Error()))
+				return
+			case http.StatusUnauthorized, http.StatusForbidden:
+				respondAPIError(w, NewAPIError(ErrCodeForbidden, http.StatusForbidden, "权限不足", err.Error()))
+				return
+			}
+		}
+
+		// 其他错误作为上游服务错误
+		respondAPIError(w, WrapUpstreamError(err))
+		return
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *Handler) reorderDocuments(w http.ResponseWriter, r *http.Request, meta service.RequestMeta) {
@@ -664,8 +733,67 @@ func (h *Handler) NodeRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	case "sources":
+		h.handleNodeSources(w, r, meta, id, parts[2:])
 	default:
 		respondError(w, http.StatusNotFound, errors.New("not found"))
+	}
+}
+
+// handleNodeSources handles source document operations for a node.
+// Routes:
+//   - GET  /api/v1/nodes/{id}/sources - list source documents
+//   - POST /api/v1/nodes/{id}/sources?document_id=X - bind source document
+//   - DELETE /api/v1/nodes/{id}/sources/{docId} - unbind source document
+func (h *Handler) handleNodeSources(w http.ResponseWriter, r *http.Request, meta service.RequestMeta, nodeID int64, subParts []string) {
+	switch r.Method {
+	case http.MethodGet:
+		// List source documents
+		sources, err := h.service.ListSourceDocuments(r.Context(), meta, nodeID)
+		if err != nil {
+			respondAPIError(w, WrapUpstreamError(err))
+			return
+		}
+		writeJSON(w, http.StatusOK, sources)
+
+	case http.MethodPost:
+		// Bind source document
+		docIDStr := r.URL.Query().Get("document_id")
+		if docIDStr == "" {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "document_id 参数必填", ""))
+			return
+		}
+		docID, err := strconv.ParseInt(docIDStr, 10, 64)
+		if err != nil {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "无效的 document_id", err.Error()))
+			return
+		}
+		result, err := h.service.BindSourceDocument(r.Context(), meta, nodeID, docID)
+		if err != nil {
+			respondAPIError(w, WrapUpstreamError(err))
+			return
+		}
+		writeJSON(w, http.StatusCreated, result)
+
+	case http.MethodDelete:
+		// Unbind source document
+		if len(subParts) < 1 || subParts[0] == "" {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "缺少 document_id", ""))
+			return
+		}
+		docID, err := strconv.ParseInt(subParts[0], 10, 64)
+		if err != nil {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "无效的 document_id", err.Error()))
+			return
+		}
+		if err := h.service.UnbindSourceDocument(r.Context(), meta, nodeID, docID); err != nil {
+			respondAPIError(w, WrapUpstreamError(err))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		respondError(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
 	}
 }
 

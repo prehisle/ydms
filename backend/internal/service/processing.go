@@ -238,6 +238,22 @@ func (s *ProcessingService) GetJob(ctx context.Context, jobID uint) (*database.P
 	return &job, nil
 }
 
+// ListJobsParams 任务列表查询参数
+type ListJobsParams struct {
+	DocumentID *int64   // 按文档 ID 过滤（可选）
+	UserID     *uint    // 按用户 ID 过滤（可选）
+	Status     []string // 按状态过滤（可选，多选）
+	Limit      int      // 分页大小
+	Offset     int      // 分页偏移
+}
+
+// ListJobsResponse 任务列表响应
+type ListJobsResponse struct {
+	Jobs    []database.ProcessingJob `json:"jobs"`
+	Total   int64                    `json:"total"`
+	HasMore bool                     `json:"has_more"`
+}
+
 // ListJobs lists processing jobs for a document.
 func (s *ProcessingService) ListJobs(ctx context.Context, documentID int64, limit int) ([]database.ProcessingJob, error) {
 	var jobs []database.ProcessingJob
@@ -249,6 +265,68 @@ func (s *ProcessingService) ListJobs(ctx context.Context, documentID int64, limi
 		return nil, err
 	}
 	return jobs, nil
+}
+
+// ListJobsWithParams 增强版任务列表查询，支持分页、状态过滤、用户过滤
+func (s *ProcessingService) ListJobsWithParams(ctx context.Context, params ListJobsParams) (*ListJobsResponse, error) {
+	query := s.db.Model(&database.ProcessingJob{})
+
+	// 按文档 ID 过滤
+	if params.DocumentID != nil {
+		query = query.Where("document_id = ?", *params.DocumentID)
+	}
+
+	// 按用户 ID 过滤
+	if params.UserID != nil {
+		query = query.Where("triggered_by_id = ?", *params.UserID)
+	}
+
+	// 按状态过滤
+	if len(params.Status) > 0 {
+		query = query.Where("status IN ?", params.Status)
+	}
+
+	// 统计总数
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	// 分页
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// 查询数据
+	var jobs []database.ProcessingJob
+	if err := query.Order("created_at DESC").Limit(limit).Offset(offset).Find(&jobs).Error; err != nil {
+		return nil, err
+	}
+
+	return &ListJobsResponse{
+		Jobs:    jobs,
+		Total:   total,
+		HasMore: int64(offset+len(jobs)) < total,
+	}, nil
+}
+
+// CountRunningJobs 统计用户进行中的任务数量
+func (s *ProcessingService) CountRunningJobs(ctx context.Context, userID uint) (int64, error) {
+	var count int64
+	err := s.db.Model(&database.ProcessingJob{}).
+		Where("triggered_by_id = ?", userID).
+		Where("status IN ?", []string{JobStatusPending, JobStatusRunning}).
+		Count(&count).Error
+	return count, err
 }
 
 // HandleCallback handles a callback from IDPP.

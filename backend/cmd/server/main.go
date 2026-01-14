@@ -116,6 +116,16 @@ func runServer() error {
 	}
 	processingService := service.NewProcessingService(db, prefect, ndr, pdmsBaseURL)
 
+	// 创建 Sync 服务
+	syncService := service.NewSyncService(db, prefect, ndr, pdmsBaseURL)
+
+	// 创建 Workflow 服务
+	workflowService := service.NewWorkflowService(db, prefect, ndr, pdmsBaseURL)
+	// 确保默认工作流定义存在
+	if err := workflowService.EnsureDefaultWorkflows(context.Background()); err != nil {
+		log.Printf("warning: failed to ensure default workflows: %v", err)
+	}
+
 	// 创建 handlers
 	headerDefaults := api.HeaderDefaults{
 		APIKey:   cfg.NDR.APIKey,
@@ -129,6 +139,8 @@ func runServer() error {
 	apiKeyHandler := api.NewAPIKeyHandler(apiKeyService)
 	assetsHandler := api.NewAssetsHandler(svc, headerDefaults)
 	processingHandler := api.NewProcessingHandler(processingService, cfg.Prefect.WebhookSecret)
+	syncHandler := api.NewSyncHandler(syncService, cfg.Prefect.WebhookSecret)
+	workflowHandler := api.NewWorkflowHandler(workflowService, handler)
 
 	// 创建路由器（使用新的配置方式）
 	router := api.NewRouterWithConfig(api.RouterConfig{
@@ -139,6 +151,8 @@ func runServer() error {
 		APIKeyHandler:     apiKeyHandler,
 		AssetsHandler:     assetsHandler,
 		ProcessingHandler: processingHandler,
+		SyncHandler:       syncHandler,
+		WorkflowHandler:   workflowHandler,
 		JWTSecret:         cfg.JWT.Secret,
 		DB:                db, // 传递 DB 用于 API Key 验证
 	})

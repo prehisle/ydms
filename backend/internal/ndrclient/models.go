@@ -209,3 +209,25 @@ type DiffDetail struct {
 	Old any `json:"old"`
 	New any `json:"new"`
 }
+
+// SourceRelation represents a source document relation.
+type SourceRelation struct {
+	NodeID       int64  `json:"node_id"`
+	DocumentID   int64  `json:"document_id"`
+	RelationType string `json:"relation_type"`
+}
+
+// SourceDocument represents a source document with its details.
+type SourceDocument struct {
+	NodeID       int64           `json:"node_id"`
+	DocumentID   int64           `json:"document_id"`
+	RelationType string          `json:"relation_type"`
+	Document     *SourceDocInfo  `json:"document,omitempty"`
+}
+
+// SourceDocInfo contains basic document info for source documents.
+type SourceDocInfo struct {
+	ID    int64   `json:"id"`
+	Title string  `json:"title"`
+	Type  *string `json:"type"`
+}
