@@ -243,31 +243,6 @@ export const DocumentPanel: FC<DocumentPanelProps> = ({
                 }
               },
             })}
-            components={{
-              body: {
-                row: (props: any) => (
-                  <tr
-                    {...props}
-                    draggable={onDocumentDragStart != null}
-                    onDragStart={(e) => {
-                      const rowKey = Number(props["data-row-key"]);
-                      const document = documents.find((doc) => doc.id === rowKey);
-                      if (document && onDocumentDragStart) {
-                        onDocumentDragStart(e, document);
-                      }
-                    }}
-                    onDragEnd={(e) => {
-                      if (onDocumentDragEnd) {
-                        onDocumentDragEnd(e);
-                      }
-                    }}
-                    style={{
-                      cursor: onDocumentDragStart ? "move" : "default",
-                    }}
-                  />
-                ),
-              },
-            }}
           />
         )}
       </Card>

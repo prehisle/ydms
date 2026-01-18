@@ -1,5 +1,5 @@
 import { DownloadOutlined, PlusOutlined, DeleteOutlined, FileTextOutlined } from "@ant-design/icons";
-import { Button, Empty, List, message, Popconfirm, Space, Spin, Typography } from "antd";
+import { Button, Collapse, Empty, List, message, Popconfirm, Space, Spin, Typography } from "antd";
 import { useEffect, useState } from "react";
 import {
   bindSourceDocument,
@@ -137,84 +137,94 @@ export function SourceDocumentManager({
 
   return (
     <div>
-      <Space direction="vertical" style={{ width: "100%" }} size="middle">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <Space>
-            <DownloadOutlined />
-            <Typography.Text strong>源文档（工作流输入）({sources.length})</Typography.Text>
-          </Space>
-          {canEdit && (
-            <Button
-              size="small"
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setSelectorOpen(true)}
-              loading={loading}
-            >
-              关联源文档
-            </Button>
-          )}
-        </div>
-
-        <Spin spinning={loading}>
-          {sources.length === 0 ? (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="暂无源文档"
-              style={{ padding: "20px 0" }}
-            />
-          ) : (
-            <List
-              size="small"
-              dataSource={sources}
-              renderItem={(source) => (
-                <List.Item
-                  actions={
-                    canEdit
-                      ? [
-                          <Popconfirm
-                            key="delete"
-                            title="确认解除关联？"
-                            description="这只会解除关联关系，不会删除文档本身"
-                            onConfirm={() => handleRemoveSource(source.document_id)}
-                            okText="确认"
-                            cancelText="取消"
-                          >
-                            <Button
-                              type="text"
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                            />
-                          </Popconfirm>,
-                        ]
-                      : undefined
-                  }
-                >
-                  <List.Item.Meta
-                    avatar={<FileTextOutlined style={{ fontSize: 16 }} />}
-                    title={
-                      <Link
-                        onClick={() => handleDocumentClick(source.document_id)}
-                        style={{ cursor: "pointer" }}
-                      >
-                        {source.document?.title || `文档 #${source.document_id}`}
-                      </Link>
-                    }
-                    description={
-                      source.document?.type && (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          类型: {source.document.type}
-                        </Text>
-                      )
-                    }
+      <Collapse
+        defaultActiveKey={[]}
+        items={[
+          {
+            key: "source-docs",
+            label: (
+              <Space>
+                <DownloadOutlined />
+                <Typography.Text strong>源文档（工作流输入）({sources.length})</Typography.Text>
+              </Space>
+            ),
+            extra: canEdit ? (
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectorOpen(true);
+                }}
+                loading={loading}
+              >
+                关联源文档
+              </Button>
+            ) : undefined,
+            children: (
+              <Spin spinning={loading}>
+                {sources.length === 0 ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="暂无源文档"
+                    style={{ padding: "20px 0" }}
                   />
-                </List.Item>
-              )}
-            />
-          )}
-        </Spin>
-      </Space>
+                ) : (
+                  <List
+                    size="small"
+                    dataSource={sources}
+                    renderItem={(source) => (
+                      <List.Item
+                        actions={
+                          canEdit
+                            ? [
+                                <Popconfirm
+                                  key="delete"
+                                  title="确认解除关联？"
+                                  description="这只会解除关联关系，不会删除文档本身"
+                                  onConfirm={() => handleRemoveSource(source.document_id)}
+                                  okText="确认"
+                                  cancelText="取消"
+                                >
+                                  <Button
+                                    type="text"
+                                    size="small"
+                                    danger
+                                    icon={<DeleteOutlined />}
+                                  />
+                                </Popconfirm>,
+                              ]
+                            : undefined
+                        }
+                      >
+                        <List.Item.Meta
+                          avatar={<FileTextOutlined style={{ fontSize: 16 }} />}
+                          title={
+                            <Link
+                              onClick={() => handleDocumentClick(source.document_id)}
+                              style={{ cursor: "pointer" }}
+                            >
+                              {source.document?.title || `文档 #${source.document_id}`}
+                            </Link>
+                          }
+                          description={
+                            source.document?.type && (
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                类型: {source.document.type}
+                              </Text>
+                            )
+                          }
+                        />
+                      </List.Item>
+                    )}
+                  />
+                )}
+              </Spin>
+            ),
+          },
+        ]}
+      />
 
       <DocumentTreeSelector
         open={selectorOpen}

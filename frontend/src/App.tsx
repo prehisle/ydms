@@ -32,6 +32,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   HistoryOutlined,
+  HolderOutlined,
   KeyOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
@@ -570,6 +571,26 @@ const AppContent = () => {
   const documentColumns = useMemo<ColumnsType<Document>>(
     () => [
       {
+        title: "",
+        key: "drag-handle",
+        width: 40,
+        align: "center",
+        render: (_: unknown, record: Document) => (
+          <span
+            className="drag-handle"
+            draggable
+            onDragStart={(e) => handleDocumentDragStart(e, record)}
+            onDragEnd={handleDocumentDragEnd}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            style={{ cursor: "grab", color: "#999", display: "inline-flex", alignItems: "center" }}
+            aria-label="拖拽文档"
+          >
+            <HolderOutlined />
+          </span>
+        ),
+      },
+      {
         title: "ID",
         dataIndex: "id",
         key: "id",
@@ -702,6 +723,8 @@ const AppContent = () => {
       handleCopyDocument,
       handleOpenDocHistoryWrapper,
       handleSoftDeleteDocument,
+      handleDocumentDragStart,
+      handleDocumentDragEnd,
     ],
   );
 

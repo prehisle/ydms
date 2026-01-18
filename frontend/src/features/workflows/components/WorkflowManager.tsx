@@ -9,7 +9,7 @@ import {
 } from "@ant-design/icons";
 import {
   Button,
-  Card,
+  Collapse,
   Empty,
   List,
   message,
@@ -172,112 +172,126 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
   const canRunWorkflow = sources.length > 0 && targetDocs.length > 0;
 
   return (
-    <Card
-      size="small"
-      title={
-        <Space>
-          <PlayCircleOutlined />
-          <span>节点工作流</span>
-        </Space>
-      }
-      extra={
-        <Space>
-          {canEdit && (
-            <Button
-              type="primary"
-              size="small"
-              icon={<PlayCircleOutlined />}
-              onClick={handleRunWorkflow}
-              disabled={!canRunWorkflow}
-              loading={triggerLoading}
-            >
-              运行工作流
-            </Button>
-          )}
-          <Tooltip title="运行历史">
-            <Button
-              size="small"
-              icon={<HistoryOutlined />}
-              onClick={() => setHistoryModalOpen(true)}
-            >
-              历史
-            </Button>
-          </Tooltip>
-        </Space>
-      }
-    >
-      <Spin spinning={loading}>
-        <Space direction="vertical" style={{ width: "100%" }} size="small">
-          {/* 状态提示 */}
-          {sources.length === 0 && (
-            <Text type="warning" style={{ fontSize: 12 }}>
-              提示：请先关联源文档，工作流将读取源文档内容生成产出
-            </Text>
-          )}
-          {sources.length > 0 && targetDocs.length === 0 && (
-            <Text type="warning" style={{ fontSize: 12 }}>
-              提示：请先创建文档，工作流将根据文档类型生成内容
-            </Text>
-          )}
-
-          {/* 待生成文档列表 */}
-          {targetDocs.length > 0 ? (
-            <>
-              <Text strong style={{ fontSize: 12 }}>
-                待生成文档：{targetDocs.length} 个
-              </Text>
-              <List
-                size="small"
-                dataSource={targetDocs}
-                renderItem={(doc) => (
-                  <List.Item style={{ padding: "4px 0" }}>
-                    <Space size="small">
-                      <FileTextOutlined style={{ color: "#1890ff" }} />
-                      <Text style={{ fontSize: 12 }}>{doc.title}</Text>
-                      <Tag style={{ fontSize: 11 }}>{doc.type}</Tag>
-                    </Space>
-                  </List.Item>
+    <>
+      <Collapse
+        defaultActiveKey={[]}
+        items={[
+          {
+            key: "workflow",
+            label: (
+              <Space>
+                <PlayCircleOutlined />
+                <span>节点工作流</span>
+              </Space>
+            ),
+            extra: (
+              <Space>
+                {canEdit && (
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRunWorkflow();
+                    }}
+                    disabled={!canRunWorkflow}
+                    loading={triggerLoading}
+                  >
+                    运行工作流
+                  </Button>
                 )}
-              />
-            </>
-          ) : (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="暂无待生成文档"
-              style={{ padding: "12px 0" }}
-            />
-          )}
+                <Tooltip title="运行历史">
+                  <Button
+                    size="small"
+                    icon={<HistoryOutlined />}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setHistoryModalOpen(true);
+                    }}
+                  >
+                    历史
+                  </Button>
+                </Tooltip>
+              </Space>
+            ),
+            children: (
+              <Spin spinning={loading}>
+                <Space direction="vertical" style={{ width: "100%" }} size="small">
+                  {/* 状态提示 */}
+                  {sources.length === 0 && (
+                    <Text type="warning" style={{ fontSize: 12 }}>
+                      提示：请先关联源文档，工作流将读取源文档内容生成产出
+                    </Text>
+                  )}
+                  {sources.length > 0 && targetDocs.length === 0 && (
+                    <Text type="warning" style={{ fontSize: 12 }}>
+                      提示：请先创建文档，工作流将根据文档类型生成内容
+                    </Text>
+                  )}
 
-          {/* 最近运行 */}
-          {runs.length > 0 && (
-            <>
-              <Text strong style={{ fontSize: 12, marginTop: 8 }}>
-                最近运行
-              </Text>
-              <List
-                size="small"
-                loading={runsLoading}
-                dataSource={runs.slice(0, 3)}
-                renderItem={(run) => (
-                  <List.Item style={{ padding: "4px 0" }}>
-                    <Space size="small">
-                      <Tag
-                        icon={statusIcons[run.status]}
-                        color={statusColors[run.status]}
-                      >
-                        {statusLabels[run.status]}
-                      </Tag>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {formatTime(run.created_at)}
+                  {/* 待生成文档列表 */}
+                  {targetDocs.length > 0 ? (
+                    <>
+                      <Text strong style={{ fontSize: 12 }}>
+                        待生成文档：{targetDocs.length} 个
                       </Text>
-                    </Space>
-                  </List.Item>
-                )}
-              />
-            </>
-          )}
-        </Space>
-      </Spin>
+                      <List
+                        size="small"
+                        dataSource={targetDocs}
+                        renderItem={(doc) => (
+                          <List.Item style={{ padding: "4px 0" }}>
+                            <Space size="small">
+                              <FileTextOutlined style={{ color: "#1890ff" }} />
+                              <Text style={{ fontSize: 12 }}>{doc.title}</Text>
+                              <Tag style={{ fontSize: 11 }}>{doc.type}</Tag>
+                            </Space>
+                          </List.Item>
+                        )}
+                      />
+                    </>
+                  ) : (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="暂无待生成文档"
+                      style={{ padding: "12px 0" }}
+                    />
+                  )}
+
+                  {/* 最近运行 */}
+                  {runs.length > 0 && (
+                    <>
+                      <Text strong style={{ fontSize: 12, marginTop: 8 }}>
+                        最近运行
+                      </Text>
+                      <List
+                        size="small"
+                        loading={runsLoading}
+                        dataSource={runs.slice(0, 3)}
+                        renderItem={(run) => (
+                          <List.Item style={{ padding: "4px 0" }}>
+                            <Space size="small">
+                              <Tag
+                                icon={statusIcons[run.status]}
+                                color={statusColors[run.status]}
+                              >
+                                {statusLabels[run.status]}
+                              </Tag>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                {formatTime(run.created_at)}
+                              </Text>
+                            </Space>
+                          </List.Item>
+                        )}
+                      />
+                    </>
+                  )}
+                </Space>
+              </Spin>
+            ),
+          },
+        ]}
+      />
 
       {/* 历史记录弹窗 */}
       <Modal
@@ -324,6 +338,6 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
           )}
         />
       </Modal>
-    </Card>
+    </>
   );
 }

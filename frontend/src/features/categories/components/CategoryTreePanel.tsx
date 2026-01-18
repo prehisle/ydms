@@ -486,6 +486,22 @@ export function CategoryTreePanel({
       });
     }
 
+    // 复制节点ID - 所有用户都可以使用
+    if (targetNode) {
+      items.push({
+        key: "copy-id",
+        icon: <CopyOutlined />,
+        label: "复制节点ID",
+        onClick: () => {
+          closeContextMenu("action:copy-id");
+          navigator.clipboard.writeText(String(targetNode.id)).then(
+            () => messageApi.success(`已复制ID: ${targetNode.id}`),
+            () => messageApi.error("复制失败")
+          );
+        },
+      });
+    }
+
     if (resolvedSelectionAvailable) {
       if (canManageCategories && resolvedSelectionIds.length === 1) {
         const targetId = resolvedSelectionIds[0];
