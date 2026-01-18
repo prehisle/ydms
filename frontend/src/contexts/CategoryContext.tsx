@@ -31,7 +31,7 @@ interface CategoryContextValue {
   selectedNodeId: number | null;
 
   // 表单
-  categoryForm: ReturnType<typeof Form.useForm<{ name: string }>>[0];
+  categoryForm: ReturnType<typeof Form.useForm<{ name: string; type?: string | null }>>[0];
 
   // 变更操作状态
   isMutating: boolean;
@@ -101,7 +101,7 @@ export const CategoryProvider = ({ messageApi, children }: CategoryProviderProps
   const [lastSelectedId, setLastSelectedId] = useState<number | null>(null);
 
   // 表单
-  const [categoryForm] = Form.useForm<{ name: string }>();
+  const [categoryForm] = Form.useForm<{ name: string; type?: string | null }>();
 
   // Mutations
   const {

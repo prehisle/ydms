@@ -1,13 +1,20 @@
 import type { FC } from "react";
 
-import { Form, Input, Modal } from "antd";
+import { Form, Input, Modal, Select } from "antd";
 import type { FormInstance } from "antd/es/form";
+
+import { CATEGORY_TYPE_OPTIONS } from "../constants";
+
+export interface CategoryFormValues {
+  name: string;
+  type?: string | null;
+}
 
 interface CategoryFormModalProps {
   open: boolean;
   title: string;
   confirmLoading: boolean;
-  form: FormInstance<{ name: string }>;
+  form: FormInstance<CategoryFormValues>;
   onCancel: () => void;
   onSubmit: () => void;
 }
@@ -48,6 +55,13 @@ export const CategoryFormModal: FC<CategoryFormModalProps> = ({
         ]}
       >
         <Input placeholder="请输入" />
+      </Form.Item>
+      <Form.Item name="type" label="节点类型">
+        <Select
+          allowClear
+          placeholder="请选择（可选）"
+          options={[...CATEGORY_TYPE_OPTIONS]}
+        />
       </Form.Item>
     </Form>
   </Modal>

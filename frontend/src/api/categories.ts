@@ -5,6 +5,7 @@ export interface Category {
   name: string;
   slug: string;
   path: string;
+  type?: string | null;
   parent_id: number | null;
   position: number;
   subtree_doc_count: number;
@@ -17,10 +18,12 @@ export interface Category {
 export interface CategoryCreatePayload {
   name: string;
   parent_id?: number | null;
+  type?: string | null;
 }
 
 export interface CategoryUpdatePayload {
   name?: string;
+  type?: string | null;
 }
 
 export interface CategoryMovePayload {

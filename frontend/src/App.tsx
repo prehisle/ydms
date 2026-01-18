@@ -301,7 +301,7 @@ const AppContent = () => {
     if (showRenameModal && selectedIds.length === 1) {
       const current = lookups.byId.get(selectedIds[0]);
       if (current) {
-        categoryForm.setFieldsValue({ name: current.name });
+        categoryForm.setFieldsValue({ name: current.name, type: current.type });
       }
     }
   }, [showRenameModal, selectedIds, lookups, categoryForm]);
@@ -322,7 +322,7 @@ const AppContent = () => {
     if (!current) {
       return;
     }
-    categoryForm.setFieldsValue({ name: current.name });
+    categoryForm.setFieldsValue({ name: current.name, type: current.type });
     handleOpenRenameModal();
   }, [categoryForm, lookups, selectedIds, handleOpenRenameModal]);
 
@@ -1052,6 +1052,7 @@ const AppContent = () => {
                 {
                   name: values.name.trim(),
                   parent_id: showCreateModal.parentId,
+                  type: values.type || null,
                 },
                 {
                   onSuccess: () => {
@@ -1068,7 +1069,7 @@ const AppContent = () => {
       />
       <CategoryFormModal
         open={showRenameModal}
-        title="重命名目录"
+        title="编辑目录"
         confirmLoading={updateMutation.isPending}
         form={categoryForm}
         onCancel={handleCloseRenameModal}
@@ -1081,7 +1082,7 @@ const AppContent = () => {
               updateMutation.mutate(
                 {
                   id: selectedIds[0],
-                  payload: { name: values.name.trim() },
+                  payload: { name: values.name.trim(), type: values.type },
                 },
                 {
                   onSuccess: () => {

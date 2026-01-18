@@ -20,6 +20,7 @@ type Category struct {
 	Name            string      `json:"name"`
 	Slug            string      `json:"slug"`
 	Path            string      `json:"path"`
+	Type            *string     `json:"type,omitempty"`
 	ParentID        *int64      `json:"parent_id,omitempty"`
 	Position        int         `json:"position"`
 	SubtreeDocCount int         `json:"subtree_doc_count"`
@@ -31,13 +32,42 @@ type Category struct {
 
 // CategoryCreateRequest captures inputs from API layer.
 type CategoryCreateRequest struct {
-	Name     string `json:"name"`
-	ParentID *int64 `json:"parent_id"`
+	Name     string  `json:"name"`
+	ParentID *int64  `json:"parent_id"`
+	Type     *string `json:"type"`
 }
 
 // CategoryUpdateRequest captures editable fields.
 type CategoryUpdateRequest struct {
-	Name *string `json:"name"`
+	Name          *string `json:"name"`
+	Type          *string `json:"type"`
+	TypeSpecified bool    `json:"-"` // 区分"未设置"和"显式设为 null"
+}
+
+func (r *CategoryUpdateRequest) UnmarshalJSON(data []byte) error {
+	type raw struct {
+		Name *string         `json:"name"`
+		Type json.RawMessage `json:"type"`
+	}
+	var aux raw
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	r.Name = aux.Name
+	if aux.Type != nil {
+		r.TypeSpecified = true
+		trimmed := bytes.TrimSpace(aux.Type)
+		if bytes.Equal(trimmed, []byte("null")) {
+			r.Type = nil
+		} else {
+			var t string
+			if err := json.Unmarshal(trimmed, &t); err != nil {
+				return err
+			}
+			r.Type = &t
+		}
+	}
+	return nil
 }
 
 // MoveCategoryRequest describes drag-and-drop operations.
@@ -197,6 +227,7 @@ func (s *Service) CreateCategory(ctx context.Context, meta RequestMeta, req Cate
 		Name:       req.Name,
 		Slug:       &slug,
 		ParentPath: parentPath,
+		Type:       req.Type,
 	}
 
 	node, err := s.ndr.CreateNode(ctx, toNDRMeta(meta), body)
@@ -212,21 +243,33 @@ func (s *Service) CreateCategory(ctx context.Context, meta RequestMeta, req Cate
 
 // UpdateCategory updates mutable node fields.
 func (s *Service) UpdateCategory(ctx context.Context, meta RequestMeta, id int64, req CategoryUpdateRequest) (Category, error) {
-	if req.Name == nil || strings.TrimSpace(*req.Name) == "" {
-		return Category{}, errors.New("name is required")
+	// 至少需要提供 name 或 type 中的一个
+	hasName := req.Name != nil && strings.TrimSpace(*req.Name) != ""
+
+	if !hasName && !req.TypeSpecified {
+		return Category{}, errors.New("name or type is required")
 	}
 
-	log.Printf("[category] update id=%d name=%q", id, strings.TrimSpace(*req.Name))
+	log.Printf("[category] update id=%d name=%v type=%v type_specified=%v", id, req.Name, req.Type, req.TypeSpecified)
 
-	// TODO: NDR 缺少 slug 唯一性校验时需在业务层兜底。
-	slug := slugify(*req.Name)
-	if slug == "" {
-		slug = fmt.Sprintf("node-%d", time.Now().UnixNano())
+	update := ndrclient.NodeUpdate{}
+
+	// 只有提供了 name 才更新 name 和 slug
+	if hasName {
+		slug := slugify(*req.Name)
+		if slug == "" {
+			slug = fmt.Sprintf("node-%d", time.Now().UnixNano())
+		}
+		update.Name = req.Name
+		update.Slug = &slug
 	}
-	node, err := s.ndr.UpdateNode(ctx, toNDRMeta(meta), id, ndrclient.NodeUpdate{
-		Name: req.Name,
-		Slug: &slug,
-	})
+
+	// 只有明确指定了 type 字段才更新（包括设为 null）
+	if req.TypeSpecified {
+		update.Type = ndrclient.NewOptionalString(req.Type)
+	}
+
+	node, err := s.ndr.UpdateNode(ctx, toNDRMeta(meta), id, update)
 	if err != nil {
 		log.Printf("[category] update node failed id=%d err=%v", id, err)
 		return Category{}, fmt.Errorf("update node: %w", err)
@@ -1042,6 +1085,7 @@ func mapNode(node ndrclient.Node, parentID *int64) *Category {
 		Name:            node.Name,
 		Slug:            node.Slug,
 		Path:            node.Path,
+		Type:            node.Type,
 		ParentID:        actualParent,
 		Position:        node.Position,
 		SubtreeDocCount: node.SubtreeDocCount,

@@ -10,6 +10,7 @@ type Node struct {
 	ID              int64      `json:"id"`
 	Name            string     `json:"name"`
 	Slug            string     `json:"slug"`
+	Type            *string    `json:"type"`
 	Path            string     `json:"path"`
 	ParentID        *int64     `json:"parent_id"`
 	Position        int        `json:"position"`
@@ -26,6 +27,7 @@ type NodeCreate struct {
 	Name       string  `json:"name"`
 	Slug       *string `json:"slug,omitempty"`
 	ParentPath *string `json:"parent_path,omitempty"`
+	Type       *string `json:"type,omitempty"`
 }
 
 // NodeUpdate mirrors NDR update payload.
@@ -33,6 +35,7 @@ type NodeUpdate struct {
 	Name       *string         `json:"name,omitempty"`
 	Slug       *string         `json:"slug,omitempty"`
 	ParentPath *OptionalString `json:"parent_path,omitempty"`
+	Type       *OptionalString `json:"type,omitempty"`
 }
 
 // NodeReorderPayload represents the body for batch reordering nodes.
