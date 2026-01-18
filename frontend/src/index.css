@@ -15,6 +15,14 @@ body {
   background-color: #f5f5f5;
 }
 
+/* 修复 Sider 内部布局，确保树面板最大化使用可用空间 */
+.documents-tree-sider > .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
 .document-history-selected-row td {
   background-color: #e6f4ff !important;
 }

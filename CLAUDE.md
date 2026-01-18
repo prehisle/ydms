@@ -590,6 +590,73 @@ PR 应包括：
 - 使用 `VITE_API_BASE_URL` 自定义 API 端点（开发时默认通过 Vite 代理到 localhost:9002）
 - React Query DevTools 在开发时可用
 
+### Flex 布局高度溢出问题
+
+**问题现象**：内容被顶出屏幕、滚动条无效、固定元素（如状态栏）不可见
+
+**根本原因**：Flex 布局中高度约束链断裂。当使用 `height: 100%` 而父元素没有明确高度，或 flex 子元素没有 `minHeight: 0` 时，内容会溢出。
+
+**调试方法**：
+1. 使用 Playwright MCP 的 `browser_evaluate` 检查元素实际尺寸和样式
+2. 检查布局链中每个元素的 `height`、`overflow`、`flex`、`minHeight` 属性
+3. 对比 `scrollHeight` 和 `clientHeight` 判断是否可滚动
+
+**修复原则**：
+```css
+/* 外层容器 - 固定高度并隐藏溢出 */
+.outer-container {
+  height: 100vh;      /* 或明确的高度值 */
+  overflow: hidden;   /* 防止内容溢出 */
+}
+
+/* Flex 容器 */
+.flex-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;      /* 关键！允许 flex 子元素收缩 */
+  overflow: hidden;
+}
+
+/* Flex 子元素 - 可增长区域 */
+.flex-child {
+  flex: 1;
+  min-height: 0;      /* 关键！允许内容收缩 */
+  overflow: hidden;   /* 或 auto，取决于是否需要滚动 */
+}
+
+/* 滚动容器 */
+.scroll-container {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;     /* 启用滚动 */
+}
+
+/* 固定高度元素 */
+.fixed-element {
+  flex-shrink: 0;     /* 防止被压缩 */
+}
+```
+
+**Ant Design 特殊处理**：
+- `ant-layout-sider-children` 默认 `overflow: visible`，需要 CSS 覆盖
+- 使用 className 选择器覆盖内部样式：
+  ```css
+  .my-sider > .ant-layout-sider-children {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+  ```
+
+**检查清单**：
+- [ ] 根容器有明确高度（`100vh` 或固定值）
+- [ ] 所有 flex 容器设置 `minHeight: 0`
+- [ ] 滚动区域父元素设置 `overflow: hidden`
+- [ ] 滚动容器设置 `overflow: auto`
+- [ ] 固定高度元素设置 `flexShrink: 0`
+- [ ] Ant Design 组件检查默认 overflow 行为
+
 ### Docker Compose 问题
 
 **错误：`KeyError: 'ContainerConfig'`**

@@ -1,5 +1,4 @@
-import { Space, Typography, Tag, Tooltip, Button, Dropdown } from "antd";
-import type { MenuProps } from "antd";
+import { Space, Typography, Tag, Tooltip, Button } from "antd";
 import {
   FolderOutlined,
   CheckCircleOutlined,
@@ -16,8 +15,6 @@ export interface StatusBarProps {
   userRole?: string;
   headerCollapsed: boolean;
   onToggleHeader: () => void;
-  userMenuItems?: MenuProps["items"];
-  userName?: string;
 }
 
 export function StatusBar({
@@ -28,8 +25,6 @@ export function StatusBar({
   userRole,
   headerCollapsed,
   onToggleHeader,
-  userMenuItems,
-  userName,
 }: StatusBarProps) {
   const getRoleLabel = (role: string) => {
     switch (role) {
@@ -109,7 +104,7 @@ export function StatusBar({
         </Typography.Text>
       </Space>
 
-      {/* 右侧：用户角色 + 用户菜单（Header 折叠时） */}
+      {/* 右侧：用户角色 */}
       <Space size={12}>
         {userRole && (
           <Space size={8}>
@@ -120,13 +115,6 @@ export function StatusBar({
               {getRoleLabel(userRole)}
             </Tag>
           </Space>
-        )}
-        {headerCollapsed && userMenuItems && userName && (
-          <Dropdown menu={{ items: userMenuItems }} placement="topRight">
-            <Button type="text" size="small" style={{ fontSize: "12px" }}>
-              {userName}
-            </Button>
-          </Dropdown>
         )}
       </Space>
     </div>

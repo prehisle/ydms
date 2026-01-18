@@ -519,7 +519,7 @@ export function CategoryTreePanel({
           {
             key: "rename-node",
             icon: <EditOutlined />,
-            label: "重命名目录",
+            label: "编辑目录",
             disabled: isMutating,
             onClick: () => {
               closeContextMenu("action:rename-node");

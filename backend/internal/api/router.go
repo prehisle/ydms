@@ -137,6 +137,8 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 
 	// Workflow 端点（节点工作流）
 	if cfg.WorkflowHandler != nil {
+		// 回调端点（不需要 JWT 认证）
+		mux.Handle("/api/v1/workflows/callback/", wrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))
 		// 工作流定义和运行记录（需要认证）
 		mux.Handle("/api/v1/workflows", authWrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))
 		mux.Handle("/api/v1/workflows/", authWrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))

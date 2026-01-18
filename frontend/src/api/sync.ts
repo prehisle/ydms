@@ -2,10 +2,10 @@ import { http } from "./http";
 
 // 同步目标配置
 export interface SyncTarget {
-  table: string;
   record_id: number;
-  field: string;
-  connection?: string;
+  table?: string;      // 可选：自定义处理器可能不需要
+  field?: string;      // 可选：自定义处理器可能不需要
+  connection?: string; // 可选：数据库连接名
 }
 
 // 最后同步信息

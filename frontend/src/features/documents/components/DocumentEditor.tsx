@@ -545,7 +545,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
         await queryClient.invalidateQueries({ queryKey: ["node-documents"] });
       }
       upsert(documentType, metadataTags);
-      closeEditor();
+      // 保存后不关闭窗口，方便继续编辑或执行同步操作
     },
     onError: (error: Error) => {
       message.error(error.message || "更新失败");

@@ -1,6 +1,6 @@
 import { type FC, useState, useCallback } from "react";
 import {
-  Drawer,
+  Card,
   Table,
   Tag,
   Space,
@@ -11,6 +11,7 @@ import {
   Empty,
   Tooltip,
   Modal,
+  Breadcrumb,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -21,9 +22,10 @@ import {
   ClockCircleOutlined,
   FileTextOutlined,
   EyeOutlined,
+  HomeOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   listProcessingJobs,
@@ -32,12 +34,7 @@ import {
 } from "../../../api/processing";
 import { getDocumentDetail } from "../../../api/documents";
 
-const { Text } = Typography;
-
-interface TaskCenterDrawerProps {
-  open: boolean;
-  onClose: () => void;
-}
+const { Text, Title } = Typography;
 
 // 任务状态到标签颜色的映射
 const statusColors: Record<string, string> = {
@@ -65,14 +62,15 @@ const pipelineLabels: Record<string, string> = {
 
 type StatusFilter = "all" | "running" | "completed" | "failed";
 
-export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
-  open,
-  onClose,
-}) => {
+/**
+ * 任务列表页面
+ * 展示所有处理任务，支持状态筛选、分页、查看详情
+ */
+export const TaskListPage: FC = () => {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const pageSize = 20;
 
   // 构建查询参数
   const getQueryParams = useCallback((): ListJobsParams => {
@@ -93,29 +91,20 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
   }, [statusFilter, page]);
 
   // 查询任务列表
-  const {
-    data,
-    isLoading,
-    isFetching,
-    refetch,
-  } = useQuery({
-    queryKey: ["task-center-jobs", statusFilter, page],
+  const { data, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ["task-list-page", statusFilter, page],
     queryFn: () => listProcessingJobs(getQueryParams()),
-    enabled: open,
     refetchInterval: (query) => {
       // 如果有进行中的任务，自动轮询
       const jobs = query.state.data?.jobs || [];
-      const hasRunning = jobs.some(
-        (job) => job.status === "pending" || job.status === "running"
-      );
-      return hasRunning ? 3000 : false;
+      const hasRunning = jobs.some((job) => job.status === "pending" || job.status === "running");
+      return hasRunning ? 5000 : false;
     },
   });
 
   // 统计进行中任务数
-  const runningCount = data?.jobs?.filter(
-    (job) => job.status === "pending" || job.status === "running"
-  ).length || 0;
+  const runningCount =
+    data?.jobs?.filter((job) => job.status === "pending" || job.status === "running").length || 0;
 
   // 格式化时间
   const formatTime = (isoString?: string) => {
@@ -138,7 +127,6 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
   const handleViewDocument = async (docId: number) => {
     try {
       await getDocumentDetail(docId);
-      onClose();
       navigate(`/documents/${docId}/edit`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "";
@@ -153,22 +141,37 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
     }
   };
 
+  // 查看任务详情
+  const handleViewTask = (taskId: number) => {
+    navigate(`/tasks/${taskId}`);
+  };
+
   // 表格列定义
   const columns: ColumnsType<ProcessingJob> = [
+    {
+      title: "任务 ID",
+      dataIndex: "id",
+      key: "id",
+      width: 80,
+    },
     {
       title: "文档",
       dataIndex: "document_title",
       key: "document_title",
-      width: 200,
+      width: 250,
       ellipsis: true,
       render: (title: string, record) => (
         <Space>
           <FileTextOutlined />
           <Tooltip title={title}>
-            <Text ellipsis style={{ maxWidth: 150 }}>{title}</Text>
+            <Text ellipsis style={{ maxWidth: 180 }}>
+              {title}
+            </Text>
           </Tooltip>
           {record.dry_run && (
-            <Tag color="orange" style={{ marginLeft: 4 }}>预览</Tag>
+            <Tag color="orange" style={{ marginLeft: 4 }}>
+              预览
+            </Tag>
           )}
         </Space>
       ),
@@ -177,16 +180,14 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
       title: "流水线",
       dataIndex: "pipeline_name",
       key: "pipeline_name",
-      width: 130,
-      render: (name: string) => (
-        <Text>{pipelineLabels[name] || name}</Text>
-      ),
+      width: 150,
+      render: (name: string) => <Text>{pipelineLabels[name] || name}</Text>,
     },
     {
       title: "状态",
       dataIndex: "status",
       key: "status",
-      width: 100,
+      width: 120,
       render: (status: string) => {
         let icon;
         switch (status) {
@@ -214,7 +215,7 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
       title: "进度",
       dataIndex: "progress",
       key: "progress",
-      width: 120,
+      width: 140,
       render: (progress: number, record) => {
         if (record.status === "completed") {
           return <Progress percent={100} size="small" />;
@@ -228,7 +229,7 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
     {
       title: "时间",
       key: "time",
-      width: 120,
+      width: 150,
       render: (_, record) => {
         if (record.status === "completed" && record.completed_at) {
           return <Text type="secondary">完成于 {formatTime(record.completed_at)}</Text>;
@@ -242,15 +243,20 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
     {
       title: "操作",
       key: "actions",
-      width: 80,
+      width: 120,
       render: (_, record) => (
-        <Tooltip title="查看文档">
-          <Button
-            type="text"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewDocument(record.document_id)}
-          />
-        </Tooltip>
+        <Space>
+          <Tooltip title="查看详情">
+            <Button type="text" icon={<EyeOutlined />} onClick={() => handleViewTask(record.id)} />
+          </Tooltip>
+          <Tooltip title="查看文档">
+            <Button
+              type="text"
+              icon={<FileTextOutlined />}
+              onClick={() => handleViewDocument(record.document_id)}
+            />
+          </Tooltip>
+        </Space>
       ),
     },
   ];
@@ -267,9 +273,7 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
     if (record.result) {
       return (
         <div style={{ padding: "8px 0" }}>
-          <Text type="secondary">
-            结果：{JSON.stringify(record.result)}
-          </Text>
+          <Text type="secondary">结果：{JSON.stringify(record.result)}</Text>
         </div>
       );
     }
@@ -284,7 +288,9 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
         <Space>
           进行中
           {runningCount > 0 && statusFilter !== "running" && (
-            <Tag color="processing" style={{ marginLeft: 4 }}>{runningCount}</Tag>
+            <Tag color="processing" style={{ marginLeft: 4 }}>
+              {runningCount}
+            </Tag>
           )}
         </Space>
       ),
@@ -300,57 +306,53 @@ export const TaskCenterDrawer: FC<TaskCenterDrawerProps> = ({
   };
 
   return (
-    <Drawer
-      title="任务中心"
-      placement="right"
-      width={800}
-      open={open}
-      onClose={onClose}
-      extra={
-        <Button
-          icon={<ReloadOutlined spin={isFetching} />}
-          onClick={() => refetch()}
-          disabled={isFetching}
+    <div style={{ padding: "24px", height: "100%", overflow: "auto" }}>
+      <Space direction="vertical" size="large" style={{ width: "100%" }}>
+        <Breadcrumb
+          items={[
+            { title: <Link to="/"><HomeOutlined /></Link> },
+            { title: "任务中心" },
+          ]}
+        />
+        <Card
+          title={<Title level={4} style={{ margin: 0 }}>任务中心</Title>}
+          extra={
+            <Button
+              icon={<ReloadOutlined spin={isFetching} />}
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              刷新
+            </Button>
+          }
         >
-          刷新
-        </Button>
-      }
-    >
-      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-        <Segmented
-          options={statusOptions}
-          value={statusFilter}
-          onChange={handleStatusChange}
-        />
-        <Table
-          dataSource={data?.jobs || []}
-          columns={columns}
-          rowKey="id"
-          loading={isLoading}
-          size="small"
-          expandable={{
-            expandedRowRender,
-            rowExpandable: (record) =>
-              !!(record.error_message || record.result),
-          }}
-          pagination={{
-            current: page,
-            pageSize,
-            total: data?.total || 0,
-            showSizeChanger: false,
-            showTotal: (total) => `共 ${total} 条`,
-            onChange: setPage,
-          }}
-          locale={{
-            emptyText: (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="暂无任务"
-              />
-            ),
-          }}
-        />
+          <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+            <Segmented options={statusOptions} value={statusFilter} onChange={handleStatusChange} />
+            <Table
+              dataSource={data?.jobs || []}
+              columns={columns}
+              rowKey="id"
+              loading={isLoading}
+              size="middle"
+              expandable={{
+                expandedRowRender,
+                rowExpandable: (record) => !!(record.error_message || record.result),
+              }}
+              pagination={{
+                current: page,
+                pageSize,
+                total: data?.total || 0,
+                showSizeChanger: false,
+                showTotal: (total) => `共 ${total} 条`,
+                onChange: setPage,
+              }}
+              locale={{
+                emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无任务" />,
+              }}
+            />
+          </Space>
+        </Card>
       </Space>
-    </Drawer>
+    </div>
   );
 };

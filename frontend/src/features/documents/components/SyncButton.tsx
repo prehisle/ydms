@@ -117,6 +117,11 @@ export const SyncButton: FC<SyncButtonProps> = ({ documentId, disabled }) => {
     }
     const target = syncStatus?.sync_target;
     if (target) {
+      // 简化配置：只有 record_id
+      if (!target.table && !target.field) {
+        return `同步到 ${target.connection || "jkt"} (id=${target.record_id})`;
+      }
+      // 完整配置：有 table 和 field
       return `同步到 ${target.connection || "rkt"}.${target.table}.${target.field}`;
     }
     return "同步到 MySQL";
@@ -199,12 +204,10 @@ export const SyncButton: FC<SyncButtonProps> = ({ documentId, disabled }) => {
               <div>
                 <Text strong>同步目标：</Text>
                 <Paragraph code style={{ margin: "4px 0" }}>
-                  {syncStatus.sync_target.connection || "rkt"}.
-                  {syncStatus.sync_target.table}.
-                  {syncStatus.sync_target.field}
-                  {" (id="}
-                  {syncStatus.sync_target.record_id}
-                  {")"}
+                  {syncStatus.sync_target.table && syncStatus.sync_target.field
+                    ? `${syncStatus.sync_target.connection || "rkt"}.${syncStatus.sync_target.table}.${syncStatus.sync_target.field} (id=${syncStatus.sync_target.record_id})`
+                    : `${syncStatus.sync_target.connection || "jkt"} (id=${syncStatus.sync_target.record_id})`
+                  }
                 </Paragraph>
               </div>
             )}
@@ -217,7 +220,15 @@ export const SyncButton: FC<SyncButtonProps> = ({ documentId, disabled }) => {
                   <span>
                     请在文档 metadata 中添加 sync_target 配置：
                     <pre style={{ marginTop: 8, fontSize: 12 }}>
-{`{
+{`// 简化配置（推荐）
+{
+  "sync_target": {
+    "record_id": 12345
+  }
+}
+
+// 完整配置（默认处理器）
+{
   "sync_target": {
     "table": "表名",
     "record_id": 记录ID,

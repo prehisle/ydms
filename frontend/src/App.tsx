@@ -1,8 +1,6 @@
 import {
-  Avatar,
   Button,
   Drawer,
-  Dropdown,
   Layout,
   Popconfirm,
   Space,
@@ -12,7 +10,6 @@ import {
   Typography,
   message,
 } from "antd";
-import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   lazy,
@@ -25,7 +22,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useOutletContext } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   CopyOutlined,
@@ -33,24 +30,19 @@ import {
   EditOutlined,
   HistoryOutlined,
   HolderOutlined,
-  KeyOutlined,
-  LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   RollbackOutlined,
-  TeamOutlined,
-  UnorderedListOutlined,
-  UserOutlined,
 } from "@ant-design/icons";
 import type { Category } from "./api/categories";
 import { useAuth } from "./contexts/AuthContext";
-import { CategoryProvider, useCategoryContext } from "./contexts/CategoryContext";
-import { DocumentProvider, useDocumentContext } from "./contexts/DocumentContext";
-import { UIProvider, useUIContext } from "./contexts/UIContext";
-import { ChangePasswordModal } from "./features/auth";
+import { useCategoryContext } from "./contexts/CategoryContext";
+import { useDocumentContext } from "./contexts/DocumentContext";
+import { useUIContext } from "./contexts/UIContext";
 import { UserManagementDrawer } from "./features/users/UserManagementDrawer";
 import { APIKeyManagementDrawer } from "./features/apikeys/APIKeyManagementDrawer";
 import { TaskCenterDrawer } from "./features/tasks";
+import type { MainLayoutOutletContext } from "./components/Layout";
 import { Document, DocumentTrashPage, DocumentVersionsPage, copyDocument } from "./api/documents";
 import { CategoryTreePanel } from "./features/categories/components/CategoryTreePanel";
 import type { CategoryTreePanelProps } from "./features/categories/components/CategoryTreePanel";
@@ -68,7 +60,6 @@ import { SourceDocumentManager } from "./features/documents/components/SourceDoc
 import { WorkflowManager } from "./features/workflows";
 import { StatusBar } from "./components/StatusBar";
 import { useDocumentDrag } from "./features/documents/hooks/useDocumentDrag";
-import { usePersistentBoolean } from "./hooks/usePersistentBoolean";
 import { useTreeSiderState } from "./features/categories/hooks/useTreeSiderState";
 import type { TreeSiderState } from "./features/categories/hooks/useTreeSiderState";
 
@@ -92,7 +83,7 @@ const DocumentEditorFallback = () => (
   </div>
 );
 
-const { Header, Sider, Content, Footer } = Layout;
+const { Sider, Content, Footer } = Layout;
 const TREE_MIN_WIDTH = 240;
 const TREE_MAX_WIDTH = 600;
 const CONTENT_MIN_WIDTH = 320;
@@ -100,15 +91,12 @@ const TREE_WIDTH_STORAGE_KEY = "ydms_tree_width";
 const TREE_COLLAPSED_STORAGE_KEY = "ydms_tree_collapsed";
 const TREE_COLLAPSED_WIDTH = 48;
 const TREE_DEFAULT_WIDTH = 360;
-const APP_LAYOUT_STYLE: CSSProperties = { height: "100vh", display: "flex", flexDirection: "column" };
-const HEADER_BASE_STYLE: CSSProperties = {
-  background: "#fff",
-  padding: "0 24px",
-  borderBottom: "1px solid #f0f0f0",
+const APP_LAYOUT_STYLE: CSSProperties = {
+  height: "100%",
+  minHeight: 0,
   display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  transition: "all 0.3s ease",
+  flexDirection: "column",
+  overflow: "hidden",
 };
 const CONTENT_STYLE: CSSProperties = { padding: "24px", overflow: "auto" };
 const DOCUMENT_STACK_STYLE: CSSProperties = { width: "100%" };
@@ -118,6 +106,7 @@ const SIDER_BASE_STYLE: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   position: "relative",
+  overflow: "hidden",
   minHeight: 0,
   height: "100%",
 };
@@ -126,7 +115,6 @@ const TREE_CONTAINER_STYLE: CSSProperties = {
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
-  height: "100%",
   overflow: "hidden",
 };
 const RESIZER_WRAPPER_STYLE: CSSProperties = {
@@ -149,12 +137,15 @@ const RESIZER_BAR_BASE_STYLE: CSSProperties = {
   transition: "background-color 0.2s ease",
 };
 
-const AppContent = () => {
-  const navigate = useNavigate();
-  const { user, logout } = useAuth();
+/**
+ * 文档管理页面组件
+ * 包含分类树、文档列表、文档编辑器等核心功能
+ */
+export const DocumentsPage = () => {
+  const { headerCollapsed, onToggleHeader } = useOutletContext<MainLayoutOutletContext>();
+  const { user } = useAuth();
   const [messageApi, contextHolder] = message.useMessage();
   const queryClient = useQueryClient();
-  const [headerCollapsed, setHeaderCollapsed] = usePersistentBoolean("ydms_header_collapsed", false);
   const treeSiderState = useTreeSiderState({
     widthStorageKey: TREE_WIDTH_STORAGE_KEY,
     collapsedStorageKey: TREE_COLLAPSED_STORAGE_KEY,
@@ -245,7 +236,6 @@ const AppContent = () => {
     documentTrashOpen,
     documentHistoryState,
     reorderModal,
-    changePasswordOpen,
     userManagementOpen,
     apiKeyManagementOpen,
     taskCenterOpen,
@@ -263,8 +253,6 @@ const AppContent = () => {
     handleCloseDocumentHistory,
     handleOpenReorderModal,
     handleCloseReorderModal,
-    handleOpenChangePassword,
-    handleCloseChangePassword,
     handleOpenUserManagement,
     handleCloseUserManagement,
     handleOpenAPIKeyManagement,
@@ -291,10 +279,6 @@ const AppContent = () => {
   useEffect(() => {
     document.title = "资料目录管理";
   }, []);
-
-  const handleToggleHeader = useCallback(() => {
-    setHeaderCollapsed((prev) => !prev);
-  }, [setHeaderCollapsed]);
 
   // Sync rename modal form values
   useEffect(() => {
@@ -743,22 +727,6 @@ const AppContent = () => {
     [],
   );
 
-  const getRoleLabel = (role: string) => {
-    switch (role) {
-      case "super_admin":
-        return "超级管理员";
-      case "course_admin":
-        return "课程管理员";
-      case "proofreader":
-        return "校对员";
-      default:
-        return role;
-    }
-  };
-
-  const canManageUsers = user?.role === "super_admin";
-  const isSuperAdmin = user?.role === "super_admin";
-
   const treePanelProps: CategoryTreePanelProps = {
     categories: categoriesList,
     lookups,
@@ -823,96 +791,10 @@ const AppContent = () => {
     onRowDoubleClick: handleEditDocument,
   };
 
-  const userMenuItems: MenuProps["items"] = [
-    {
-      key: "user-info",
-      label: (
-        <div>
-          <div style={{ fontWeight: 500 }}>{user?.display_name || user?.username}</div>
-          <div style={{ fontSize: "12px", color: "#999" }}>{getRoleLabel(user?.role || "")}</div>
-        </div>
-      ),
-      disabled: true,
-    },
-    { type: "divider" },
-    {
-      key: "task-center",
-      label: "任务中心",
-      icon: <UnorderedListOutlined />,
-      onClick: () => {
-        handleOpenTaskCenter();
-      },
-    },
-    ...(canManageUsers
-      ? [
-          {
-            key: "user-management",
-            label: "用户管理",
-            icon: <TeamOutlined />,
-            onClick: () => {
-              handleOpenUserManagement();
-            },
-          },
-        ]
-      : []),
-    ...(isSuperAdmin
-      ? [
-          {
-            key: "apikey-management",
-            label: "API Key 管理",
-            icon: <KeyOutlined />,
-            onClick: () => {
-              handleOpenAPIKeyManagement();
-            },
-          },
-        ]
-      : []),
-    {
-      key: "change-password",
-      label: "修改密码",
-      icon: <KeyOutlined />,
-      onClick: () => {
-        handleOpenChangePassword();
-      },
-    },
-    {
-      key: "logout",
-      label: "退出登录",
-      icon: <LogoutOutlined />,
-      onClick: async () => {
-        try {
-          await logout();
-          message.success("已退出登录");
-          navigate("/login");
-        } catch (error) {
-          message.error("退出登录失败");
-        }
-      },
-    },
-  ];
-
   return (
     <Layout style={APP_LAYOUT_STYLE}>
       {contextHolder}
-      <Header
-        style={{
-          ...HEADER_BASE_STYLE,
-          height: headerCollapsed ? 0 : 64,
-          minHeight: headerCollapsed ? 0 : 64,
-          lineHeight: headerCollapsed ? 0 : "64px",
-          overflow: "hidden",
-          opacity: headerCollapsed ? 0 : 1,
-        }}
-      >
-        <div style={{ fontSize: "18px", fontWeight: 600 }}>YDMS 资料管理系统</div>
-        <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-          <Space style={{ cursor: "pointer" }}>
-            <Avatar icon={<UserOutlined />} size="small" />
-            <span>{user?.display_name || user?.username}</span>
-          </Space>
-        </Dropdown>
-      </Header>
-      <Layout ref={treeSiderState.layoutRef} style={{ flex: 1, overflow: "hidden" }}>
+      <Layout ref={treeSiderState.layoutRef} style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
         <TreeSider state={treeSiderState} collapsedWidth={TREE_COLLAPSED_WIDTH} baseStyle={SIDER_BASE_STYLE}>
           <CategoryTreePanel {...treePanelProps} />
         </TreeSider>
@@ -935,9 +817,7 @@ const AppContent = () => {
           includeDescendants={includeDescendants}
           userRole={user?.role}
           headerCollapsed={headerCollapsed}
-          onToggleHeader={handleToggleHeader}
-          userMenuItems={userMenuItems}
-          userName={user?.display_name || user?.username}
+          onToggleHeader={onToggleHeader}
         />
       </Footer>
       <CategoryTrashModal
@@ -1097,7 +977,6 @@ const AppContent = () => {
             .catch(() => undefined);
         }}
       />
-      <ChangePasswordModal open={changePasswordOpen} onClose={handleCloseChangePassword} />
       <UserManagementDrawer open={userManagementOpen} onClose={handleCloseUserManagement} />
       <APIKeyManagementDrawer open={apiKeyManagementOpen} onClose={handleCloseAPIKeyManagement} />
       <TaskCenterDrawer open={taskCenterOpen} onClose={handleCloseTaskCenter} />
@@ -1126,6 +1005,7 @@ const TreeSider = ({ state, collapsedWidth, baseStyle, children }: TreeSiderProp
 
   return (
     <Sider
+      className="documents-tree-sider"
       width={treeWidth}
       collapsedWidth={collapsedWidth}
       collapsed={treeCollapsed}
@@ -1143,7 +1023,7 @@ const TreeSider = ({ state, collapsedWidth, baseStyle, children }: TreeSiderProp
           type="text"
           aria-label={treeCollapsed ? "展开目录树" : "折叠目录树"}
           onClick={toggleCollapsed}
-          style={toggleButtonStyle}
+          style={{ ...toggleButtonStyle, flexShrink: 0 }}
         />
       </Tooltip>
       {!treeCollapsed && (
@@ -1206,35 +1086,6 @@ const DocumentContentSection = ({ breadcrumb, panel, sourceManager }: DocumentCo
       )}
       <DocumentPanel {...panel} />
     </Space>
-  );
-};
-
-const AppWithProviders = () => {
-  const [messageApi, contextHolder] = message.useMessage();
-  const categoryContext = useCategoryContext();
-
-  return (
-    <>
-      {contextHolder}
-      <DocumentProvider messageApi={messageApi} selectedNodeId={categoryContext.selectedNodeId}>
-        <AppContent />
-      </DocumentProvider>
-    </>
-  );
-};
-
-const App = () => {
-  const [messageApi, contextHolder] = message.useMessage();
-
-  return (
-    <>
-      {contextHolder}
-      <UIProvider>
-        <CategoryProvider messageApi={messageApi}>
-          <AppWithProviders />
-        </CategoryProvider>
-      </UIProvider>
-    </>
   );
 };
 
@@ -1313,5 +1164,3 @@ function buildTrashColumns(
     },
   ];
 }
-
-export default App;

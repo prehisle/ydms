@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,10 +55,10 @@ func NewSyncService(db *gorm.DB, prefect *prefectclient.Client, ndr ndrclient.Cl
 
 // SyncTarget 同步目标配置（存储在文档 metadata.sync_target 中）
 type SyncTarget struct {
-	Table      string `json:"table"`
-	RecordID   int64  `json:"record_id"`
-	Field      string `json:"field"`
-	Connection string `json:"connection"`
+	Table      string `json:"table,omitempty"`      // 可选：默认处理器需要，自定义处理器可能不需要
+	RecordID   int64  `json:"record_id"`            // 必需：目标记录 ID
+	Field      string `json:"field,omitempty"`      // 可选：默认处理器需要，自定义处理器可能不需要
+	Connection string `json:"connection,omitempty"` // 可选：数据库连接名，默认根据文档类型决定
 }
 
 // TriggerSyncRequest 触发同步请求
@@ -449,39 +450,55 @@ func parseSyncTarget(metadata map[string]interface{}) (*SyncTarget, error) {
 		return nil, nil
 	}
 
-	// 将 map 转换为 JSON 再解析为结构体
-	jsonBytes, err := json.Marshal(syncTargetRaw)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal sync_target: %w", err)
-	}
-
 	var syncTarget SyncTarget
-	if err := json.Unmarshal(jsonBytes, &syncTarget); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal sync_target: %w", err)
+
+	switch v := syncTargetRaw.(type) {
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil, nil
+		}
+		// 尝试解析为 JSON 对象
+		if err := json.Unmarshal([]byte(trimmed), &syncTarget); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal sync_target: %w", err)
+		}
+	case float64:
+		// JSON 数字会被解析为 float64，支持直接配置为整数
+		syncTarget.RecordID = int64(v)
+	case int64:
+		syncTarget.RecordID = v
+	case int:
+		syncTarget.RecordID = int64(v)
+	case map[string]interface{}:
+		// 将 map 转换为 JSON 再解析为结构体
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal sync_target: %w", err)
+		}
+		if err := json.Unmarshal(jsonBytes, &syncTarget); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal sync_target: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported sync_target type: %T", syncTargetRaw)
 	}
 
-	// 验证必要字段
-	if syncTarget.Table == "" || syncTarget.RecordID == 0 || syncTarget.Field == "" {
-		return nil, fmt.Errorf("incomplete sync_target config: table=%s, record_id=%d, field=%s",
-			syncTarget.Table, syncTarget.RecordID, syncTarget.Field)
+	// 验证必要字段：只要求 record_id
+	// table 和 field 由具体的处理器决定是否需要
+	if syncTarget.RecordID == 0 {
+		return nil, fmt.Errorf("sync_target.record_id is required")
 	}
 
 	// 安全验证：表名和字段名只允许安全标识符（防止 SQL 注入）
 	identifierPattern := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-	if !identifierPattern.MatchString(syncTarget.Table) {
+	if syncTarget.Table != "" && !identifierPattern.MatchString(syncTarget.Table) {
 		return nil, fmt.Errorf("invalid table name: %s (must match pattern ^[a-zA-Z_][a-zA-Z0-9_]*$)", syncTarget.Table)
 	}
-	if !identifierPattern.MatchString(syncTarget.Field) {
+	if syncTarget.Field != "" && !identifierPattern.MatchString(syncTarget.Field) {
 		return nil, fmt.Errorf("invalid field name: %s (must match pattern ^[a-zA-Z_][a-zA-Z0-9_]*$)", syncTarget.Field)
 	}
 
-	// 默认连接名
-	if syncTarget.Connection == "" {
-		syncTarget.Connection = "rkt"
-	}
-
-	// 连接名也需要验证
-	if !identifierPattern.MatchString(syncTarget.Connection) {
+	// 连接名验证（如果提供）
+	if syncTarget.Connection != "" && !identifierPattern.MatchString(syncTarget.Connection) {
 		return nil, fmt.Errorf("invalid connection name: %s", syncTarget.Connection)
 	}
 
