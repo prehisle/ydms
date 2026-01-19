@@ -6,6 +6,9 @@ import react from "@vitejs/plugin-react";
 // 默认使用 9002 (统一端口体系)
 const apiTarget = process.env.VITE_API_TARGET || "http://localhost:9002";
 
+// MinIO 地址，用于代理静态资源访问
+const minioTarget = process.env.VITE_MINIO_TARGET || "http://localhost:9005";
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -15,6 +18,10 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: apiTarget,
+        changeOrigin: true,
+      },
+      "/ndr-assets": {
+        target: minioTarget,
         changeOrigin: true,
       },
     },

@@ -142,19 +142,32 @@ func runServer() error {
 	syncHandler := api.NewSyncHandler(syncService, cfg.Prefect.WebhookSecret)
 	workflowHandler := api.NewWorkflowHandler(workflowService, handler)
 
+	// 创建静态资源代理（如果配置了 MinIO URL）
+	var staticProxyHandler *api.StaticProxyHandler
+	if cfg.MinIO.URL != "" {
+		var err error
+		staticProxyHandler, err = api.NewStaticProxyHandler(cfg.MinIO.URL)
+		if err != nil {
+			log.Printf("warning: failed to create static proxy handler: %v", err)
+		} else {
+			log.Printf("Static proxy enabled: /ndr-assets/* -> %s", cfg.MinIO.URL)
+		}
+	}
+
 	// 创建路由器（使用新的配置方式）
 	router := api.NewRouterWithConfig(api.RouterConfig{
-		Handler:           handler,
-		AuthHandler:       authHandler,
-		UserHandler:       userHandler,
-		CourseHandler:     courseHandler,
-		APIKeyHandler:     apiKeyHandler,
-		AssetsHandler:     assetsHandler,
-		ProcessingHandler: processingHandler,
-		SyncHandler:       syncHandler,
-		WorkflowHandler:   workflowHandler,
-		JWTSecret:         cfg.JWT.Secret,
-		DB:                db, // 传递 DB 用于 API Key 验证
+		Handler:            handler,
+		AuthHandler:        authHandler,
+		UserHandler:        userHandler,
+		CourseHandler:      courseHandler,
+		APIKeyHandler:      apiKeyHandler,
+		AssetsHandler:      assetsHandler,
+		ProcessingHandler:  processingHandler,
+		SyncHandler:        syncHandler,
+		WorkflowHandler:    workflowHandler,
+		StaticProxyHandler: staticProxyHandler,
+		JWTSecret:          cfg.JWT.Secret,
+		DB:                 db, // 传递 DB 用于 API Key 验证
 	})
 
 	server := &http.Server{

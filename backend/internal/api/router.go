@@ -25,6 +25,7 @@ type RouterConfig struct {
 	ProcessingHandler *ProcessingHandler
 	SyncHandler       *SyncHandler
 	WorkflowHandler   *WorkflowHandler
+	StaticProxyHandler *StaticProxyHandler
 	JWTSecret         string
 	DB                *gorm.DB // 用于 API Key 验证
 }
@@ -142,6 +143,11 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 		// 工作流定义和运行记录（需要认证）
 		mux.Handle("/api/v1/workflows", authWrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))
 		mux.Handle("/api/v1/workflows/", authWrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))
+	}
+
+	// 静态资源代理（/ndr-assets/* -> MinIO）
+	if cfg.StaticProxyHandler != nil {
+		mux.Handle("/ndr-assets/", cfg.StaticProxyHandler)
 	}
 
 	return mux

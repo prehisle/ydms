@@ -509,14 +509,20 @@ YDMS_DEFAULT_USER_ID=system
 YDMS_ADMIN_KEY=your-ndr-admin-key
 YDMS_DEBUG_TRAFFIC=1  # 记录向 NDR 的 HTTP 请求和响应
 YDMS_JWT_SECRET=your-jwt-secret  # JWT 签名密钥
+YDMS_MINIO_URL=http://localhost:9005  # MinIO 地址，启用后端代理 /ndr-assets 路径
 ```
 
 前端读取 `frontend/.env`：
 ```
 VITE_API_BASE_URL=http://localhost:9002  # API 基础 URL（可选，默认使用 Vite 代理）
+VITE_MINIO_TARGET=http://localhost:9005  # MinIO 地址，用于代理 /ndr-assets 资源
 VITE_DEBUG_DRAG=1  # 启用拖拽调试日志
 VITE_DEBUG_MENU=1  # 启用菜单调试模式
 ```
+
+**图片资源访问**：文档中的图片使用相对路径 `/ndr-assets/...` 存储。
+- **开发环境**：Vite 开发服务器自动代理到 MinIO（`VITE_MINIO_TARGET`）
+- **生产环境**：配置 `YDMS_MINIO_URL` 让后端代理，无需额外配置 nginx
 
 **绝不提交秘钥**，如 `YDMS_NDR_API_KEY` 或 `YDMS_ADMIN_KEY`。
 

@@ -129,11 +129,27 @@ export function isImageContentType(contentType: string): boolean {
 }
 
 /**
+ * 从完整 URL 提取相对路径
+ * 例: http://localhost:9005/ndr-assets/assets/12/image.png -> /ndr-assets/assets/12/image.png
+ */
+function extractRelativePath(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.pathname;
+  } catch {
+    // 已经是相对路径，直接返回
+    return url;
+  }
+}
+
+/**
  * 根据上传结果生成 Markdown 链接
+ * 使用相对路径以支持跨环境访问
  */
 export function formatUploadLink(result: UploadResult): string {
+  const relativePath = extractRelativePath(result.downloadUrl);
   if (isImageContentType(result.contentType)) {
-    return `![${result.filename}](${result.downloadUrl})`;
+    return `![${result.filename}](${relativePath})`;
   }
-  return `[${result.filename}](${result.downloadUrl})`;
+  return `[${result.filename}](${relativePath})`;
 }

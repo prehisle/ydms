@@ -16,6 +16,7 @@ type Config struct {
 	JWT      JWTConfig
 	Admin    AdminBootstrapConfig
 	Prefect  PrefectConfig
+	MinIO    MinIOConfig
 }
 
 // NDRConfig stores settings for the upstream NDR service.
@@ -66,6 +67,11 @@ type PrefectConfig struct {
 	PublicBaseURL string // Public URL for callbacks (defaults to http://localhost:{port})
 }
 
+// MinIOConfig stores MinIO proxy settings for static assets.
+type MinIOConfig struct {
+	URL string // MinIO server URL (empty to disable proxy)
+}
+
 // Load builds a Config object from environment variables, providing sane defaults.
 func Load() Config {
 	return Config{
@@ -103,6 +109,9 @@ func Load() Config {
 			WebhookSecret: os.Getenv("YDMS_PREFECT_WEBHOOK_SECRET"),
 			Timeout:       parseEnvInt("YDMS_PREFECT_TIMEOUT", 300),
 			PublicBaseURL: os.Getenv("YDMS_PUBLIC_BASE_URL"), // For callback URLs
+		},
+		MinIO: MinIOConfig{
+			URL: os.Getenv("YDMS_MINIO_URL"), // Empty by default (disabled)
 		},
 	}
 }
