@@ -1,4 +1,4 @@
-import { type FC, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { type FC, type CSSProperties, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
@@ -14,6 +14,9 @@ import {
   Layout,
   Result,
   Progress,
+  Tag,
+  Popover,
+  Tooltip,
 } from "antd";
 import {
   SaveOutlined,
@@ -23,10 +26,12 @@ import {
   MinusCircleOutlined,
   LinkOutlined,
   CopyOutlined,
+  FolderOutlined,
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "../../../contexts/AuthContext";
+import { useCategoryContext } from "../../../contexts/CategoryContext";
 import {
   DOCUMENT_TYPES,
   DOCUMENT_TYPE_MAP,
@@ -41,10 +46,12 @@ import {
   bindDocument,
   createDocument,
   getDocumentDetail,
+  getDocumentBindings,
   updateDocument,
   type Document,
   type DocumentCreatePayload,
   type DocumentUpdatePayload,
+  type DocumentBinding,
 } from "../../../api/documents";
 import type { MetadataValueType } from "../types";
 import { DocumentReferenceModal } from "./DocumentReferenceModal";
@@ -186,6 +193,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
   const { docId: docIdParam } = useParams<{ docId: string }>();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { lookups } = useCategoryContext();
   const { getTags, upsert } = useDocumentTagCache(user?.id ?? null);
 
   const parsedDocIdFromRoute = docIdParam ? Number.parseInt(docIdParam, 10) : undefined;
@@ -237,6 +245,18 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
         return null;
       }
 	return getDocumentDetail(effectiveDocId);
+    },
+    enabled: isEditMode && typeof effectiveDocId === "number",
+  });
+
+  // 获取文档绑定的节点路径信息
+  const { data: documentBindings, isLoading: isLoadingBindings } = useQuery<DocumentBinding[]>({
+    queryKey: ["document-bindings", effectiveDocId],
+    queryFn: async () => {
+      if (!effectiveDocId) {
+        return [];
+      }
+      return getDocumentBindings(effectiveDocId);
     },
     enabled: isEditMode && typeof effectiveDocId === "number",
   });
@@ -309,6 +329,110 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
   const editorLanguage = useMemo(() => {
     return getDocumentContentFormat(documentType);
   }, [documentType]);
+
+  // 根据节点 ID 构建完整的人类可读路径（从分类树递归查找）
+  const buildReadablePath = useCallback((nodeId: number): string => {
+    const names: string[] = [];
+    let currentId: number | null = nodeId;
+
+    while (currentId !== null) {
+      const category = lookups.byId.get(currentId);
+      if (!category) break;
+      names.unshift(category.name);
+      currentId = category.parent_id;
+    }
+
+    return names.length > 0 ? names.join(" / ") : "";
+  }, [lookups.byId]);
+
+  // 格式化节点路径用于显示
+  const formattedBindings = useMemo(() => {
+    if (!documentBindings || documentBindings.length === 0) {
+      return [];
+    }
+    return documentBindings
+      .filter((binding) => binding.node_id)
+      .sort((a, b) => a.node_path.localeCompare(b.node_path))
+      .map((binding) => {
+        // 优先使用分类树构建人类可读路径，回退到 node_name
+        const readablePath = buildReadablePath(binding.node_id);
+        return {
+          nodeId: binding.node_id,
+          displayPath: readablePath || binding.node_name || `节点 ${binding.node_id}`,
+          rawPath: binding.node_path,
+        };
+      });
+  }, [documentBindings, buildReadablePath]);
+
+  // 节点路径显示组件
+  const bindingsDisplay = useMemo(() => {
+    if (!isEditMode) {
+      return null;
+    }
+    if (isLoadingBindings) {
+      return (
+        <Space size={4} align="center">
+          <Spin size="small" />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            加载路径...
+          </Text>
+        </Space>
+      );
+    }
+    if (formattedBindings.length === 0) {
+      return null;
+    }
+
+    const firstBinding = formattedBindings[0];
+    const restCount = formattedBindings.length - 1;
+
+    // 完整路径内容（用于 Popover 展示）
+    const fullPathContent = (
+      <div style={{ maxWidth: 500 }}>
+        {formattedBindings.map((binding, index) => (
+          <div
+            key={binding.nodeId}
+            style={{
+              padding: "8px 0",
+              borderBottom: index < formattedBindings.length - 1 ? "1px solid #f0f0f0" : "none",
+            }}
+          >
+            <Space>
+              <FolderOutlined style={{ color: "#1890ff" }} />
+              <span style={{ wordBreak: "break-all" }}>{binding.displayPath}</span>
+            </Space>
+          </div>
+        ))}
+      </div>
+    );
+
+    return (
+      <Popover
+        content={fullPathContent}
+        title={`所属目录${restCount > 0 ? ` (共 ${formattedBindings.length} 个)` : ""}`}
+        placement="bottomLeft"
+        trigger="hover"
+      >
+        <Tag
+          style={{
+            fontSize: 12,
+            color: "#595959",
+            background: "#fafafa",
+            borderColor: "#d9d9d9",
+            cursor: "pointer",
+            maxWidth: 300,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <FolderOutlined style={{ marginRight: 4 }} />
+          {firstBinding.displayPath}
+          {restCount > 0 && <span style={{ marginLeft: 4, color: "#1890ff" }}>+{restCount}</span>}
+        </Tag>
+      </Popover>
+    );
+  }, [isEditMode, isLoadingBindings, formattedBindings]);
 
   const handleTypeChange = useCallback((value: string) => {
     setDocumentType(value);
@@ -701,6 +825,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
           <Title level={5} style={{ margin: 0 }}>
             {isEditMode ? "编辑文档" : "新建文档"}
           </Title>
+          {bindingsDisplay}
 
           <Input
             placeholder="请输入文档标题"

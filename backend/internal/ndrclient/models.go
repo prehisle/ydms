@@ -176,6 +176,15 @@ type DocumentBindingStatus struct {
 	NodeIDs       []int64 `json:"node_ids"`
 }
 
+// DocumentBinding represents a binding relationship between a document and a node.
+type DocumentBinding struct {
+	NodeID    int64  `json:"node_id"`
+	NodeName  string `json:"node_name"`
+	NodePath  string `json:"node_path"`
+	CreatedAt string `json:"created_at"`
+	CreatedBy string `json:"created_by,omitempty"`
+}
+
 // DocumentVersion represents a version of a document.
 type DocumentVersion struct {
 	DocumentID    int64          `json:"document_id"`

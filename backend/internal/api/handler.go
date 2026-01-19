@@ -235,6 +235,11 @@ func (h *Handler) DocumentRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if parts[1] == "bindings" {
+		h.getDocumentBindings(w, r, meta, id)
+		return
+	}
+
 	if parts[1] == "copy" {
 		// POST /api/v1/documents/{id}/copy - copy document
 		h.copyDocument(w, r, meta, id)
@@ -391,6 +396,19 @@ func (h *Handler) getDocumentBindingStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (h *Handler) getDocumentBindings(w http.ResponseWriter, r *http.Request, meta service.RequestMeta, id int64) {
+	if r.Method != http.MethodGet {
+		respondError(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
+		return
+	}
+	bindings, err := h.service.GetDocumentBindings(r.Context(), meta, id)
+	if err != nil {
+		respondAPIError(w, WrapUpstreamError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, bindings)
 }
 
 func (h *Handler) copyDocument(w http.ResponseWriter, r *http.Request, meta service.RequestMeta, id int64) {
@@ -870,8 +888,23 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request, meta se
 		return
 	}
 
-	if err := h.service.DeleteCategory(r.Context(), meta, id); err != nil {
-		respondAPIError(w, WrapUpstreamError(err))
+	var payload service.CategoryDeleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && err != io.EOF {
+		respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "请求格式错误", err.Error()))
+		return
+	}
+
+	if err := h.service.DeleteCategory(r.Context(), meta, id, payload); err != nil {
+		switch {
+		case errors.Is(err, service.ErrCategoryHasChildren):
+			respondAPIError(w, ErrCategoryHasChildren)
+		case errors.Is(err, service.ErrInvalidAdminPassword):
+			respondAPIError(w, ErrInvalidAdminPassword)
+		case errors.Is(err, service.ErrForceDeleteForbidden):
+			respondAPIError(w, ErrInsufficientPermission([]string{"super_admin"}, meta.UserRole))
+		default:
+			respondAPIError(w, WrapUpstreamError(err))
+		}
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

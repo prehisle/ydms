@@ -193,6 +193,11 @@ func (s *Service) GetDocumentBindingStatus(ctx context.Context, meta RequestMeta
 	return s.ndr.GetDocumentBindingStatus(ctx, toNDRMeta(meta), docID)
 }
 
+// GetDocumentBindings returns all node bindings for a document.
+func (s *Service) GetDocumentBindings(ctx context.Context, meta RequestMeta, docID int64) ([]ndrclient.DocumentBinding, error) {
+	return s.ndr.GetDocumentBindings(ctx, toNDRMeta(meta), docID)
+}
+
 // DocumentUpdateRequest represents the payload required to update a document.
 type DocumentUpdateRequest struct {
 	Title    *string        `json:"title,omitempty"`

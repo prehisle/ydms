@@ -1073,6 +1073,27 @@ func (f *inMemoryNDR) GetDocumentBindingStatus(ctx context.Context, meta ndrclie
 	}, nil
 }
 
+func (f *inMemoryNDR) GetDocumentBindings(ctx context.Context, meta ndrclient.RequestMeta, docID int64) ([]ndrclient.DocumentBinding, error) {
+	var bindings []ndrclient.DocumentBinding
+	for nodeID, docs := range f.bindings {
+		if _, ok := docs[docID]; ok {
+			nodeName := fmt.Sprintf("node-%d", nodeID)
+			nodePath := fmt.Sprintf("path.to.node_%d", nodeID)
+			if node, exists := f.nodes[nodeID]; exists {
+				nodeName = node.Name
+				nodePath = node.Path
+			}
+			bindings = append(bindings, ndrclient.DocumentBinding{
+				NodeID:   nodeID,
+				NodeName: nodeName,
+				NodePath: nodePath,
+			})
+		}
+	}
+	sort.Slice(bindings, func(i, j int) bool { return bindings[i].NodeID < bindings[j].NodeID })
+	return bindings, nil
+}
+
 func (f *inMemoryNDR) BindRelationship(ctx context.Context, meta ndrclient.RequestMeta, nodeID, docID int64) (ndrclient.Relationship, error) {
 	if f.bindings[nodeID] == nil {
 		f.bindings[nodeID] = make(map[int64]struct{})

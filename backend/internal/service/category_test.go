@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"testing"
 	"time"
@@ -281,6 +282,22 @@ func (f *fakeNDR) GetDocumentBindingStatus(_ context.Context, _ ndrclient.Reques
 	}, nil
 }
 
+func (f *fakeNDR) GetDocumentBindings(_ context.Context, _ ndrclient.RequestMeta, docID int64) ([]ndrclient.DocumentBinding, error) {
+	var bindings []ndrclient.DocumentBinding
+	if f.docBindings != nil {
+		if nodeBindings, ok := f.docBindings[docID]; ok {
+			for nodeID := range nodeBindings {
+				bindings = append(bindings, ndrclient.DocumentBinding{
+					NodeID:   nodeID,
+					NodeName: fmt.Sprintf("node-%d", nodeID),
+					NodePath: fmt.Sprintf("path.to.node_%d", nodeID),
+				})
+			}
+		}
+	}
+	return bindings, nil
+}
+
 func (f *fakeNDR) ListDocumentVersions(_ context.Context, _ ndrclient.RequestMeta, docID int64, page, size int) (ndrclient.DocumentVersionsPage, error) {
 	if f.docVersionsResp.Page == 0 && f.docVersionsResp.Total == 0 && len(f.docVersionsResp.Versions) == 0 && len(f.docVersionsResp.Items) == 0 {
 		return ndrclient.DocumentVersionsPage{
@@ -442,7 +459,7 @@ func TestDeleteCategory(t *testing.T) {
 	fake := newFakeNDR()
 	svc := NewService(cache.NewNoop(), fake, nil)
 
-	if err := svc.DeleteCategory(context.Background(), RequestMeta{}, 9); err != nil {
+	if err := svc.DeleteCategory(context.Background(), RequestMeta{}, 9, CategoryDeleteRequest{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(fake.deletedNodes) != 1 || fake.deletedNodes[0] != 9 {
@@ -459,7 +476,7 @@ func TestDeleteCategoryWithChildren(t *testing.T) {
 	fake.getNodes[101] = child
 	svc := NewService(cache.NewNoop(), fake, nil)
 
-	if err := svc.DeleteCategory(context.Background(), RequestMeta{}, 100); err == nil {
+	if err := svc.DeleteCategory(context.Background(), RequestMeta{}, 100, CategoryDeleteRequest{}); err == nil {
 		t.Fatalf("expected error when deleting parent with children")
 	}
 	if len(fake.deletedNodes) != 0 {
