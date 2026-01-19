@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/yjxt/ydms/backend/internal/auth"
 	"github.com/yjxt/ydms/backend/internal/ndrclient"
 )
 
@@ -69,6 +71,17 @@ func (r *CategoryUpdateRequest) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+// CategoryDeleteRequest captures delete options from API layer.
+type CategoryDeleteRequest struct {
+	AdminPassword *string `json:"admin_password,omitempty"`
+}
+
+var (
+	ErrCategoryHasChildren  = errors.New("cannot delete category with children")
+	ErrInvalidAdminPassword = errors.New("invalid admin password")
+	ErrForceDeleteForbidden = errors.New("force delete requires super admin")
+)
 
 // MoveCategoryRequest describes drag-and-drop operations.
 type MoveCategoryRequest struct {
@@ -281,19 +294,124 @@ func (s *Service) UpdateCategory(ctx context.Context, meta RequestMeta, id int64
 }
 
 // DeleteCategory performs a soft delete in NDR.
-func (s *Service) DeleteCategory(ctx context.Context, meta RequestMeta, id int64) error {
-	log.Printf("[category] delete id=%d", id)
+// If admin_password is provided and valid, it will recursively delete all children.
+func (s *Service) DeleteCategory(ctx context.Context, meta RequestMeta, id int64, req CategoryDeleteRequest) error {
+	force := req.AdminPassword != nil && strings.TrimSpace(*req.AdminPassword) != ""
+	log.Printf("[category] delete id=%d force=%v", id, force)
+
+	if force {
+		if err := s.verifyAdminPassword(meta, *req.AdminPassword); err != nil {
+			return err
+		}
+		return s.deleteCategoryRecursive(ctx, meta, id)
+	}
+
 	hasChildren, err := s.ndr.HasChildren(ctx, toNDRMeta(meta), id)
 	if err != nil {
 		log.Printf("[category] check children failed id=%d err=%v", id, err)
 		return fmt.Errorf("check children: %w", err)
 	}
 	if hasChildren {
-		return errors.New("cannot delete category with children")
+		return ErrCategoryHasChildren
 	}
 	if err := s.ndr.DeleteNode(ctx, toNDRMeta(meta), id); err != nil {
 		log.Printf("[category] delete node failed id=%d err=%v", id, err)
 		return fmt.Errorf("delete node: %w", err)
+	}
+	return nil
+}
+
+// verifyAdminPassword checks if the provided password matches the current user's password.
+func (s *Service) verifyAdminPassword(meta RequestMeta, password string) error {
+	if strings.TrimSpace(password) == "" {
+		return ErrInvalidAdminPassword
+	}
+	if meta.UserRole != "super_admin" || meta.UserIDNumeric == 0 {
+		return ErrForceDeleteForbidden
+	}
+	if s.userService == nil {
+		return ErrForceDeleteForbidden
+	}
+	user, err := s.userService.GetUserByID(meta.UserIDNumeric)
+	if err != nil {
+		return err
+	}
+	if !auth.CheckPassword(password, user.PasswordHash) {
+		return ErrInvalidAdminPassword
+	}
+	return nil
+}
+
+// deleteCategoryRecursive recursively deletes a category and all its children.
+func (s *Service) deleteCategoryRecursive(ctx context.Context, meta RequestMeta, id int64) error {
+	children, err := s.ndr.ListChildren(ctx, toNDRMeta(meta), id, ndrclient.ListChildrenParams{})
+	if err != nil {
+		log.Printf("[category] list children failed id=%d err=%v", id, err)
+		return fmt.Errorf("list children: %w", err)
+	}
+	for _, child := range children {
+		if err := s.deleteCategoryRecursive(ctx, meta, child.ID); err != nil {
+			return err
+		}
+	}
+	if err := s.deleteCategoryDocuments(ctx, meta, id); err != nil {
+		return err
+	}
+	if err := s.ndr.DeleteNode(ctx, toNDRMeta(meta), id); err != nil {
+		log.Printf("[category] delete node failed id=%d err=%v", id, err)
+		return fmt.Errorf("delete node: %w", err)
+	}
+	log.Printf("[category] deleted node id=%d", id)
+	return nil
+}
+
+// deleteCategoryDocuments deletes all documents bound to a category.
+// Source documents (workflow inputs) are excluded from deletion.
+func (s *Service) deleteCategoryDocuments(ctx context.Context, meta RequestMeta, nodeID int64) error {
+	// Build source document ID set to exclude from deletion
+	sourceDocIDs := make(map[int64]struct{})
+	sources, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), nodeID)
+	if err != nil {
+		log.Printf("[category] list source documents failed node=%d err=%v", nodeID, err)
+		return fmt.Errorf("list source documents: %w", err)
+	}
+	for _, src := range sources {
+		sourceDocIDs[src.DocumentID] = struct{}{}
+	}
+
+	query := url.Values{}
+	query.Set("include_descendants", "false")
+	page := 1
+	pageSize := 100
+	skippedSourceDocs := 0
+
+	for {
+		query.Set("page", fmt.Sprintf("%d", page))
+		query.Set("size", fmt.Sprintf("%d", pageSize))
+		docsPage, err := s.ndr.ListNodeDocuments(ctx, toNDRMeta(meta), nodeID, query)
+		if err != nil {
+			log.Printf("[category] list node documents failed id=%d err=%v", nodeID, err)
+			return fmt.Errorf("list node documents: %w", err)
+		}
+		for _, doc := range docsPage.Items {
+			if _, isSource := sourceDocIDs[doc.ID]; isSource {
+				skippedSourceDocs++
+				continue
+			}
+			if err := s.ndr.DeleteDocument(ctx, toNDRMeta(meta), doc.ID); err != nil {
+				log.Printf("[category] delete document failed node=%d doc=%d err=%v", nodeID, doc.ID, err)
+				return fmt.Errorf("delete document %d: %w", doc.ID, err)
+			}
+			log.Printf("[category] deleted document id=%d from node=%d", doc.ID, nodeID)
+		}
+		if len(docsPage.Items) == 0 || len(docsPage.Items) < pageSize {
+			break
+		}
+		page++
+	}
+
+	if skippedSourceDocs > 0 {
+		log.Printf("[category] skipped %d source documents from deletion for node=%d", skippedSourceDocs, nodeID)
 	}
 	return nil
 }
@@ -616,7 +734,7 @@ func (s *Service) BulkDeleteCategories(ctx context.Context, meta RequestMeta, id
 			continue
 		}
 		seen[id] = struct{}{}
-		if err := s.DeleteCategory(ctx, meta, id); err != nil {
+		if err := s.DeleteCategory(ctx, meta, id, CategoryDeleteRequest{}); err != nil {
 			return nil, err
 		}
 		deleted = append(deleted, id)
@@ -725,7 +843,7 @@ func (s *Service) BulkCopyCategories(ctx context.Context, meta RequestMeta, req 
 func (s *Service) rollbackCreatedCategories(ctx context.Context, meta RequestMeta, createdIDs []int64) {
 	for _, id := range createdIDs {
 		// 使用软删除进行回滚，忽略错误继续
-		_ = s.DeleteCategory(ctx, meta, id)
+		_ = s.DeleteCategory(ctx, meta, id, CategoryDeleteRequest{})
 	}
 }
 
