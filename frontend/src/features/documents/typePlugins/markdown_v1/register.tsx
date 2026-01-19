@@ -214,8 +214,8 @@ const MarkdownV1Preview: FC<{ content: string }> = ({ content }) => (
               {children}
             </ul>
           ),
-          ol: ({ children }) => (
-            <ol style={{ paddingLeft: "24px", marginTop: "8px", marginBottom: "8px" }}>
+          ol: ({ children, start }) => (
+            <ol start={start} style={{ paddingLeft: "24px", marginTop: "8px", marginBottom: "8px", listStyleType: "decimal" }}>
               {children}
             </ol>
           ),
