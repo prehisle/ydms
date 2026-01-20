@@ -106,9 +106,14 @@ export async function updateCategory(
   });
 }
 
-export async function deleteCategory(id: number) {
+export interface CategoryDeletePayload {
+  admin_password?: string;
+}
+
+export async function deleteCategory(id: number, payload?: CategoryDeletePayload) {
   return http<void>(`/api/v1/categories/${id}`, {
     method: "DELETE",
+    body: payload ? JSON.stringify(payload) : undefined,
   });
 }
 

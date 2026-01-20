@@ -12,6 +12,7 @@ import {
   type CategoryCreatePayload,
   type CategoryUpdatePayload,
   type CategoryBulkIDsPayload,
+  type CategoryDeletePayload,
   type Category,
 } from "../../../api/categories";
 
@@ -63,7 +64,8 @@ export function useTreeActions(messageApi: MessageApiLike) {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => deleteCategory(id),
+    mutationFn: ({ id, payload }: { id: number; payload?: CategoryDeletePayload }) =>
+      deleteCategory(id, payload),
     onSuccess: async () => {
       messageApi.success("目录删除成功");
       setIsMutating(false);

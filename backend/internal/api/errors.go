@@ -77,6 +77,13 @@ var (
 		"请先删除或移动子分类",
 	)
 
+	ErrInvalidAdminPassword = NewAPIError(
+		ErrCodeUnauthorized,
+		http.StatusUnauthorized,
+		"管理员密码错误",
+		"请提供正确的管理员密码",
+	)
+
 	ErrCategoryNameRequired = NewAPIError(
 		ErrCodeValidation,
 		http.StatusBadRequest,
