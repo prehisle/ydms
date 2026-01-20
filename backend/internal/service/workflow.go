@@ -122,7 +122,7 @@ func (s *WorkflowService) TriggerWorkflow(
 
 	// 3. Get target documents (node's direct documents) for generate_node_documents workflow
 	var targetDocs []map[string]interface{}
-	if req.WorkflowKey == "generate_node_documents" {
+	if req.WorkflowKey == "generate_node_documents" || req.WorkflowKey == "generate_node_documents_v2" || req.WorkflowKey == "generate_node_documents_v3" {
 		query := url.Values{}
 		query.Set("include_descendants", "false")
 		query.Set("size", "100")
@@ -371,6 +371,22 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 			Name:                  "生成节点文档",
 			Description:           "根据源文档，一次性生成节点下所有文档的内容",
 			PrefectDeploymentName: "node-generate-documents-deployment",
+			ParameterSchema:       database.JSONMap{},
+			Enabled:               true,
+		},
+		{
+			WorkflowKey:           "generate_node_documents_v2",
+			Name:                  "生成节点文档(增强版)",
+			Description:           "增强版文档生成：更完整的知识覆盖、高质量SVG结构图、详细的题目逐项解析",
+			PrefectDeploymentName: "node-generate-documents-v2-deployment",
+			ParameterSchema:       database.JSONMap{},
+			Enabled:               true,
+		},
+		{
+			WorkflowKey:           "generate_node_documents_v3",
+			Name:                  "生成节点文档(V3)",
+			Description:           "V3版本：新增规划阶段、灰度SVG、禁止emoji、必背融合到正文",
+			PrefectDeploymentName: "node-generate-documents-v3-deployment",
 			ParameterSchema:       database.JSONMap{},
 			Enabled:               true,
 		},

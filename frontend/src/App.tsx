@@ -326,7 +326,7 @@ export const DocumentsPage = () => {
     await trashQuery.refetch();
   }, [setSelectedTrashRowKeys, handleOpenTrash, trashQuery]);
 
-  const handleConfirmDelete = useCallback(() => {
+  const handleConfirmDelete = useCallback((adminPassword?: string) => {
     if (!deletePreview.visible || deletePreview.ids.length === 0) {
       return;
     }
@@ -340,12 +340,15 @@ export const DocumentsPage = () => {
     if (deletePreview.mode === "soft") {
       if (targetIds.length === 1) {
         const targetId = targetIds[0];
-        deleteMutation.mutate(targetId, {
-          onSuccess: () => {
-            closeDeletePreview();
+        deleteMutation.mutate(
+          { id: targetId, payload: adminPassword ? { admin_password: adminPassword } : undefined },
+          {
+            onSuccess: () => {
+              closeDeletePreview();
+            },
+            onError: (err) => handleError(err, "删除失败，请重试"),
           },
-          onError: (err) => handleError(err, "删除失败，请重试"),
-        });
+        );
       } else {
         bulkDeleteMutation.mutate(
           { ids: targetIds },

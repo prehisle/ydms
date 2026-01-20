@@ -6,10 +6,12 @@ import {
   LoadingOutlined,
   ClockCircleOutlined,
   FileTextOutlined,
+  DownOutlined,
 } from "@ant-design/icons";
 import {
   Button,
   Collapse,
+  Dropdown,
   Empty,
   List,
   message,
@@ -20,10 +22,13 @@ import {
   Tooltip,
   Typography,
 } from "antd";
+import type { MenuProps } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   listNodeWorkflowRuns,
+  listWorkflowDefinitions,
   triggerNodeWorkflow,
+  type WorkflowDefinition,
   type WorkflowRun,
 } from "../../../api/workflows";
 import {
@@ -72,6 +77,7 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
   const [nodeDocs, setNodeDocs] = useState<Document[]>([]);
   const [sources, setSources] = useState<SourceDocument[]>([]);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
 
   // 加载状态
   const [loading, setLoading] = useState(false);
@@ -85,7 +91,7 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
     return nodeDocs.filter(doc => !sourceDocIds.has(doc.id));
   }, [nodeDocs, sources]);
 
-  // 加载节点数据（源文档 + 节点文档 + 运行历史）
+  // 加载节点数据（源文档 + 节点文档 + 运行历史 + 工作流定义）
   useEffect(() => {
     if (!nodeId) return;
 
@@ -95,10 +101,11 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
       setLoading(true);
       try {
         // 并发加载，避免串行等待
-        const [sourcesData, docsPage, runsData] = await Promise.all([
+        const [sourcesData, docsPage, runsData, workflowsData] = await Promise.all([
           getNodeSourceDocuments(nodeId),
           getNodeDocuments(nodeId, { include_descendants: false, size: 100 }),
           listNodeWorkflowRuns(nodeId, { limit: 10 }),
+          listWorkflowDefinitions(),
         ]);
 
         // 检查是否已取消（节点已切换）
@@ -107,6 +114,8 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
         setSources(sourcesData);
         setNodeDocs(docsPage.items);
         setRuns(runsData.runs || []);
+        // 过滤出以 generate_node_documents 开头的工作流（节点文档生成类）
+        setWorkflows(workflowsData.filter(w => w.workflow_key.startsWith("generate_node_documents")));
       } catch (error) {
         if (!cancelled) {
           console.error("Failed to load workflow data:", error);
@@ -122,6 +131,7 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
     setSources([]);
     setNodeDocs([]);
     setRuns([]);
+    setWorkflows([]);
 
     loadData();
 
@@ -143,11 +153,11 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
     }
   }, [nodeId]);
 
-  // 运行工作流（直接触发统一工作流）
-  const handleRunWorkflow = async () => {
+  // 运行工作流
+  const handleRunWorkflow = async (workflowKey: string) => {
     try {
       setTriggerLoading(true);
-      const result = await triggerNodeWorkflow(nodeId, "generate_node_documents", {});
+      const result = await triggerNodeWorkflow(nodeId, workflowKey, {});
       message.success(result.message || "工作流已触发");
       refreshRuns(); // 刷新运行历史
     } catch (error: any) {
@@ -156,6 +166,22 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
       setTriggerLoading(false);
     }
   };
+
+  // 工作流下拉菜单项
+  const workflowMenuItems: MenuProps["items"] = workflows.map((wf) => ({
+    key: wf.workflow_key,
+    label: (
+      <Space direction="vertical" size={0}>
+        <span>{wf.name}</span>
+        {wf.description && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {wf.description}
+          </Typography.Text>
+        )}
+      </Space>
+    ),
+    onClick: () => handleRunWorkflow(wf.workflow_key),
+  }));
 
   // 格式化时间
   const formatTime = (timeStr?: string) => {
@@ -186,20 +212,23 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
             ),
             extra: (
               <Space>
-                {canEdit && (
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<PlayCircleOutlined />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRunWorkflow();
-                    }}
-                    disabled={!canRunWorkflow}
-                    loading={triggerLoading}
+                {canEdit && workflows.length > 0 && (
+                  <Dropdown
+                    menu={{ items: workflowMenuItems }}
+                    trigger={["click"]}
+                    disabled={!canRunWorkflow || triggerLoading}
                   >
-                    运行工作流
-                  </Button>
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<PlayCircleOutlined />}
+                      onClick={(e) => e.stopPropagation()}
+                      disabled={!canRunWorkflow}
+                      loading={triggerLoading}
+                    >
+                      运行工作流 <DownOutlined />
+                    </Button>
+                  </Dropdown>
                 )}
                 <Tooltip title="运行历史">
                   <Button
