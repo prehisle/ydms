@@ -21,6 +21,7 @@ import {
 import {
   SaveOutlined,
   CloseOutlined,
+  FullscreenOutlined,
   FullscreenExitOutlined,
   PlusOutlined,
   MinusCircleOutlined,
@@ -37,10 +38,12 @@ import {
   DOCUMENT_TYPE_MAP,
   DOCUMENT_TYPE_KEYS,
 } from "../constants";
+import { DOCUMENT_TYPE_THEMES } from "../../../generated/documentTypeThemes";
+import overviewStylesCss from "../typePlugins/overviewStyles.css?inline";
+import { parseFrontMatterHtml } from "../typePlugins/shared";
 import { getDocumentTemplate } from "../templates";
 import { HTMLPreview } from "./HTMLPreview";
 import { YAMLPreview } from "./YAMLPreview";
-import { resolveYamlPreview } from "../previewRegistry";
 import { useDocumentTagCache } from "../hooks/useDocumentTagCache";
 import {
   bindDocument,
@@ -80,6 +83,12 @@ interface DocumentEditorProps {
   nodeId?: number;
   onClose?: () => void;
 }
+
+/** 编辑/预览区域布局模式 */
+type PaneMode = "split" | "editor" | "preview";
+
+/** HTML 预览样式类型 */
+type HtmlPreviewStyle = "default" | "yjxt" | `theme:${string}`;
 
 interface MetadataEntry {
   id: string;
@@ -216,6 +225,11 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
   const [pendingReferences, setPendingReferences] = useState<Array<{ document_id: number; title: string }>>([]);
   const [referenceModalOpen, setReferenceModalOpen] = useState(false);
 
+  // 编辑/预览区域布局模式
+  const [paneMode, setPaneMode] = useState<PaneMode>("split");
+  // HTML 预览样式
+  const [htmlPreviewStyle, setHtmlPreviewStyle] = useState<HtmlPreviewStyle>("default");
+
   // 文件上传 hook
   const { uploadFile, uploading, progress } = useFileUpload();
   // Monaco 编辑器实例引用
@@ -324,11 +338,84 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
     upsert(documentType, metadataTags);
   }, [documentType, metadataTags, upsert]);
 
-  const hasCustomPreview = useMemo(() => resolveYamlPreview(documentType) != null, [documentType]);
-
   const editorLanguage = useMemo(() => {
     return getDocumentContentFormat(documentType);
   }, [documentType]);
+
+  /** 当前文档是否为 HTML 格式 */
+  const isHtmlDocument = editorLanguage === "html";
+
+  /** HTML 预览内容（剥离 YAML front-matter） */
+  const htmlPreviewContent = useMemo(() => {
+    if (!isHtmlDocument) {
+      return content;
+    }
+    return parseFrontMatterHtml(content).body;
+  }, [content, isHtmlDocument]);
+
+  /** HTML 预览样式选项 */
+  const htmlPreviewStyleOptions = useMemo(() => {
+    const themeOptions = DOCUMENT_TYPE_THEMES.knowledge_overview_v1.map((theme) => ({
+      value: `theme:${theme.id}`,
+      label: theme.label,
+      title: "description" in theme ? theme.description : undefined,
+    }));
+
+    return [
+      { value: "default", label: "默认（内置）" },
+      { value: "yjxt", label: "YJXT 基础" },
+      { label: "知识点概览主题", options: themeOptions },
+    ];
+  }, []);
+
+  /** 当前选中的主题（仅当样式以 theme: 开头时有效） */
+  const selectedOverviewTheme = useMemo(() => {
+    if (!htmlPreviewStyle.startsWith("theme:")) {
+      return undefined;
+    }
+    const themeId = htmlPreviewStyle.slice("theme:".length);
+    const theme = DOCUMENT_TYPE_THEMES.knowledge_overview_v1.find((item) => item.id === themeId);
+    if (!theme) {
+      return undefined;
+    }
+    return { ...theme, className: `overview-theme-${theme.id}` };
+  }, [htmlPreviewStyle]);
+
+  /** HTML 预览注入的 CSS 文本 */
+  const htmlPreviewInjectedCss = useMemo(() => {
+    if (!isHtmlDocument) {
+      return undefined;
+    }
+    if (htmlPreviewStyle === "yjxt") {
+      return overviewStylesCss;
+    }
+    if (selectedOverviewTheme?.css) {
+      return `${overviewStylesCss}\n${selectedOverviewTheme.css}`;
+    }
+    return undefined;
+  }, [isHtmlDocument, htmlPreviewStyle, selectedOverviewTheme]);
+
+  /** HTML 预览 wrapper className */
+  const htmlPreviewWrapperClassName = useMemo(() => {
+    if (!isHtmlDocument) {
+      return undefined;
+    }
+    if (selectedOverviewTheme) {
+      return ["overview-theme-wrapper", selectedOverviewTheme.className].filter(Boolean).join(" ");
+    }
+    return undefined;
+  }, [isHtmlDocument, selectedOverviewTheme]);
+
+  /** HTML 预览 content className */
+  const htmlPreviewContentClassName = useMemo(() => {
+    if (!isHtmlDocument) {
+      return undefined;
+    }
+    if (htmlPreviewStyle === "yjxt") {
+      return "yjxt-main-content";
+    }
+    return undefined;
+  }, [isHtmlDocument, htmlPreviewStyle]);
 
   // 根据节点 ID 构建完整的人类可读路径（从分类树递归查找）
   const buildReadablePath = useCallback((nodeId: number): string => {
@@ -763,6 +850,17 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
     };
   }, [uploadFile]);
 
+  // paneMode 变化时通知 Monaco 重新布局（仅在编辑器可见时）
+  useEffect(() => {
+    if (paneMode === "preview") {
+      return; // 编辑器隐藏时不触发布局
+    }
+    const rafId = requestAnimationFrame(() => {
+      editorRef.current?.layout();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [paneMode]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
@@ -770,13 +868,27 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
         handleSave();
       }
       if (e.key === "Escape") {
+        // 如果事件已被其他处理器（如 Modal、Select 等）处理，不再继续
+        if (e.defaultPrevented) {
+          return;
+        }
+        // 如果有弹窗打开，让弹窗先处理 Esc（Antd Modal 自带 Esc 关闭）
+        if (referenceModalOpen) {
+          return;
+        }
+        // 若处于最大化状态，先恢复 split 布局
+        if (paneMode !== "split") {
+          e.preventDefault();
+          setPaneMode("split");
+          return;
+        }
         handleCancel();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSave, handleCancel]);
+  }, [handleSave, handleCancel, paneMode, referenceModalOpen]);
 
   const isEmbedded = typeof onClose === "function";
   const containerHeight = isEmbedded ? "100%" : "100vh";
@@ -911,9 +1023,10 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
       <Content style={{ display: "flex", height: contentHeight }}>
         <div
           style={{
-            width: "50%",
-            borderRight: "1px solid #f0f0f0",
-            display: "flex",
+            flex: 1,
+            minWidth: 0,
+            borderRight: paneMode === "split" ? "1px solid #f0f0f0" : "none",
+            display: paneMode === "preview" ? "none" : "flex",
             flexDirection: "column",
           }}
         >
@@ -923,9 +1036,20 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
               background: "#fafafa",
               borderBottom: "1px solid #f0f0f0",
               fontWeight: 500,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
             }}
           >
-            源码编辑
+            <span>源码编辑</span>
+            <Tooltip title={paneMode === "editor" ? "退出最大化" : "最大化编辑"}>
+              <Button
+                type="text"
+                size="small"
+                icon={paneMode === "editor" ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                onClick={() => setPaneMode((prev) => (prev === "editor" ? "split" : "editor"))}
+              />
+            </Tooltip>
           </div>
           <div
             style={{
@@ -1058,22 +1182,59 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
           </div>
         </div>
 
-        <div style={{ width: "50%", display: "flex", flexDirection: "column", background: "#fff" }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: paneMode === "editor" ? "none" : "flex",
+            flexDirection: "column",
+            background: "#fff",
+          }}
+        >
           <div
             style={{
               padding: "8px 16px",
               background: "#fafafa",
               borderBottom: "1px solid #f0f0f0",
               fontWeight: 500,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
             }}
           >
-            实时预览
+            <span>实时预览</span>
+            <Space size={12} align="center">
+              {isHtmlDocument && (
+                <Space size={4} align="center">
+                  <Typography.Text type="secondary">样式：</Typography.Text>
+                  <Select
+                    size="small"
+                    value={htmlPreviewStyle}
+                    options={htmlPreviewStyleOptions}
+                    onChange={(value) => setHtmlPreviewStyle(value as HtmlPreviewStyle)}
+                    style={{ minWidth: 160 }}
+                    dropdownMatchSelectWidth={false}
+                  />
+                </Space>
+              )}
+              <Tooltip title={paneMode === "preview" ? "退出最大化" : "最大化预览"}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={paneMode === "preview" ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                  onClick={() => setPaneMode((prev) => (prev === "preview" ? "split" : "preview"))}
+                />
+              </Tooltip>
+            </Space>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
-            {hasCustomPreview ? (
-              <YAMLPreview content={content} documentType={documentType} />
-            ) : getDocumentContentFormat(documentType) === "html" ? (
-              <HTMLPreview content={content} />
+            {isHtmlDocument ? (
+              <HTMLPreview
+                content={htmlPreviewContent}
+                className={htmlPreviewWrapperClassName}
+                contentClassName={htmlPreviewContentClassName}
+                styleCss={htmlPreviewInjectedCss}
+              />
             ) : (
               <YAMLPreview content={content} documentType={documentType} />
             )}

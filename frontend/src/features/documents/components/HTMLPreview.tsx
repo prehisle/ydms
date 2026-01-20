@@ -7,9 +7,11 @@ interface HTMLPreviewProps {
   className?: string;
   contentClassName?: string;
   unstyled?: boolean;
+  /** 额外注入的 CSS 文本，追加在内置样式之后 */
+  styleCss?: string;
 }
 
-export const HTMLPreview: FC<HTMLPreviewProps> = ({ content, className, contentClassName, unstyled }) => {
+export const HTMLPreview: FC<HTMLPreviewProps> = ({ content, className, contentClassName, unstyled, styleCss }) => {
   const sanitizedHTML = useMemo(() => {
     if (!content || !content.trim()) {
       return null;
@@ -160,6 +162,7 @@ export const HTMLPreview: FC<HTMLPreviewProps> = ({ content, className, contentC
         .html-preview-content a:hover {
           text-decoration: underline;
         }
+        ${styleCss ?? ""}
       `}</style>
     </div>
   );
