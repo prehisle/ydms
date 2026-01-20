@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type {
   CSSProperties,
   Key,
@@ -55,7 +55,8 @@ const PANEL_BODY_STYLE: CSSProperties = {
 const PANEL_SCROLL_STYLE: CSSProperties = {
   flex: 1,
   minHeight: 0,
-  overflow: "auto",
+  // Tree virtual scroll will manage its own scroll container; avoid double scrollbars.
+  overflow: "hidden",
 };
 
 const PANEL_PLACEHOLDER_STYLE: CSSProperties = {
@@ -136,6 +137,8 @@ export function CategoryTreePanel({
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [autoExpandParent, setAutoExpandParent] = useState(true);
   const [dropTargetNodeId, setDropTargetNodeId] = useState<number | null>(null);
+  const [treeContainerEl, setTreeContainerEl] = useState<HTMLDivElement | null>(null);
+  const [treeHeight, setTreeHeight] = useState(0);
   const {
     clipboard,
     clipboardSourceSet,
@@ -160,9 +163,29 @@ export function CategoryTreePanel({
   );
   const treeData = filteredTree.nodes;
   const defaultExpandedKeys = useMemo(
-    () => getDefaultExpandedKeys(effectiveCategories, 3),
+    () => getDefaultExpandedKeys(effectiveCategories, 1),
     [effectiveCategories],
   );
+
+  useLayoutEffect(() => {
+    if (!treeContainerEl) return;
+
+    const update = () => {
+      const next = Math.max(0, Math.floor(treeContainerEl.clientHeight));
+      setTreeHeight((prev) => (prev === next ? prev : next));
+    };
+
+    update();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+
+    const ro = new ResizeObserver(() => update());
+    ro.observe(treeContainerEl);
+    return () => ro.disconnect();
+  }, [treeContainerEl]);
 
   useEffect(() => {
     if (searchValue.trim()) {
@@ -283,17 +306,9 @@ export function CategoryTreePanel({
         messageApi.warning("请先选择需要删除的目录");
         return;
       }
-      const hasChildren = ids.find((id) => {
-        const childList = lookups.parentToChildren.get(id) ?? [];
-        return childList.length > 0;
-      });
-      if (hasChildren != null) {
-        messageApi.error("无法删除含子节点的目录");
-        return;
-      }
       onRequestDelete(ids);
     },
-    [lookups.parentToChildren, messageApi, onRequestDelete],
+    [messageApi, onRequestDelete],
   );
 
   const { handlePasteAsChild, handlePasteBefore, handlePasteAfter } = useTreePaste({
@@ -310,6 +325,13 @@ export function CategoryTreePanel({
   });
 
   const handleNodeDragOver = useCallback((event: ReactDragEvent<HTMLSpanElement>, nodeId: number) => {
+    // 检查是否是文档拖放（使用 Array.from 处理 DOMStringList 兼容性）
+    const isDocumentDrag = Array.from(event.dataTransfer.types).includes("application/json");
+    if (!isDocumentDrag) {
+      // 节点拖拽：不阻止冒泡，让事件传递给 Tree 组件
+      return;
+    }
+    // 文档拖放：阻止默认行为和冒泡，显示拖放目标
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
@@ -317,6 +339,13 @@ export function CategoryTreePanel({
   }, []);
 
   const handleNodeDragLeave = useCallback((event: ReactDragEvent<HTMLSpanElement>) => {
+    // 检查是否是文档拖放（使用 Array.from 处理 DOMStringList 兼容性）
+    const isDocumentDrag = Array.from(event.dataTransfer.types).includes("application/json");
+    if (!isDocumentDrag) {
+      // 节点拖拽：不阻止冒泡，让事件传递给 Tree 组件
+      return;
+    }
+    // 文档拖放：清理高亮状态
     event.preventDefault();
     event.stopPropagation();
     setDropTargetNodeId(null);
@@ -324,18 +353,26 @@ export function CategoryTreePanel({
 
   const handleNodeDrop = useCallback(
     (event: ReactDragEvent<HTMLSpanElement>, nodeId: number) => {
+      // 先检查是否是文档拖放
+      const data = event.dataTransfer.getData("application/json");
+      if (!data) {
+        // 不是文档拖放，让事件继续冒泡给 Tree 组件处理节点拖拽
+        return;
+      }
+
+      // 有 JSON 数据，视为文档拖放尝试，阻止冒泡
       event.preventDefault();
       event.stopPropagation();
       setDropTargetNodeId(null);
 
       try {
-        const data = event.dataTransfer.getData("application/json");
-        if (!data) {
+        const dragData = JSON.parse(data);
+        if (dragData.type !== "document") {
+          // 不是文档类型，忽略但不报错
           return;
         }
 
-        const dragData = JSON.parse(data);
-        if (dragData.type === "document" && onDocumentDrop) {
+        if (onDocumentDrop) {
           onDocumentDrop(nodeId, dragData);
         }
       } catch (error) {
@@ -789,8 +826,18 @@ export function CategoryTreePanel({
       </div>
     );
   } else {
+    // 虚拟滚动需要有效的容器高度，否则退回普通滚动模式
+    const enableVirtual = treeHeight > 0;
+    const scrollStyle: CSSProperties = {
+      ...PANEL_SCROLL_STYLE,
+      overflow: enableVirtual ? "hidden" : "auto",
+    };
     bodyContent = (
-      <div style={PANEL_SCROLL_STYLE} onContextMenuCapture={suppressNativeContextMenu}>
+      <div
+        ref={setTreeContainerEl}
+        style={scrollStyle}
+        onContextMenuCapture={suppressNativeContextMenu}
+      >
         <Tree<TreeDataNode>
           blockNode
           draggable={{ icon: false }}
@@ -808,6 +855,9 @@ export function CategoryTreePanel({
             setExpandedKeys(keys.map(String));
             setAutoExpandParent(false);
           }}
+          virtual={enableVirtual}
+          height={enableVirtual ? treeHeight : undefined}
+          itemHeight={28}
           style={{ userSelect: "none" }}
         />
       </div>
