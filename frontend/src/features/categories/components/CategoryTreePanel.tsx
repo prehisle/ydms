@@ -7,7 +7,7 @@ import type {
   ReactNode,
 } from "react";
 
-import { Alert, Empty, Menu, Spin, Tag, Tree, Typography } from "antd";
+import { Alert, Empty, Menu, Modal, Spin, Tag, Tree, Typography } from "antd";
 import type { MenuProps, TreeProps } from "antd";
 import type { MessageInstance } from "antd/es/message/interface";
 import {
@@ -23,6 +23,11 @@ import {
 } from "@ant-design/icons";
 
 import type { Category } from "../../../api/categories";
+import {
+  bindSourceDocument,
+  getNodeDocuments,
+  getNodeSourceDocuments,
+} from "../../../api/documents";
 import { CategoryTreeToolbar } from "./CategoryTreeToolbar";
 import type { CategoryLookups, ParentKey, TreeDataNode } from "../types";
 import { buildFilteredTree, getParentId } from "../utils";
@@ -34,6 +39,14 @@ import { useTreeDrag } from "../hooks/useTreeDrag";
 type AntTreeProps = TreeProps<TreeDataNode>;
 type TreeRightClickInfo = Parameters<NonNullable<AntTreeProps["onRightClick"]>>[0];
 type TreeSelectInfo = Parameters<NonNullable<AntTreeProps["onSelect"]>>[1];
+
+/** 文档剪贴板状态，用于跨节点复制/粘贴文档ID */
+interface DocClipboard {
+  sourceNodeId: number;
+  sourceNodeName: string;
+  docIds: number[];
+  copiedAt: number;
+}
 
 const PANEL_ROOT_STYLE: CSSProperties = {
   flex: 1,
@@ -139,6 +152,7 @@ export function CategoryTreePanel({
   const [dropTargetNodeId, setDropTargetNodeId] = useState<number | null>(null);
   const [treeContainerEl, setTreeContainerEl] = useState<HTMLDivElement | null>(null);
   const [treeHeight, setTreeHeight] = useState(0);
+  const [docClipboard, setDocClipboard] = useState<DocClipboard | null>(null);
   const {
     clipboard,
     clipboardSourceSet,
@@ -309,6 +323,182 @@ export function CategoryTreePanel({
       onRequestDelete(ids);
     },
     [messageApi, onRequestDelete],
+  );
+
+  /** 复制节点子树下所有文档的 ID */
+  const handleCopySubtreeDocIds = useCallback(
+    async (nodeId: number, nodeName: string) => {
+      const messageKey = "copy-subtree-doc-ids";
+      messageApi.open({
+        type: "loading",
+        content: "正在获取子树文档...",
+        key: messageKey,
+        duration: 0,
+      });
+
+      try {
+        const pageSize = 100; // API 最大支持 100
+        const allIds: number[] = [];
+        const seen = new Set<number>();
+        let page = 1;
+
+        while (true) {
+          const result = await getNodeDocuments(nodeId, {
+            page,
+            size: pageSize,
+            include_descendants: true,
+          });
+
+          for (const doc of result.items ?? []) {
+            if (!seen.has(doc.id)) {
+              seen.add(doc.id);
+              allIds.push(doc.id);
+            }
+          }
+
+          const fetchedCount = result.page * result.size;
+          if ((result.items?.length ?? 0) === 0 || fetchedCount >= result.total) {
+            break;
+          }
+          page += 1;
+        }
+
+        if (allIds.length === 0) {
+          messageApi.info({ content: "该节点子树下没有文档", key: messageKey });
+          return;
+        }
+
+        setDocClipboard({
+          sourceNodeId: nodeId,
+          sourceNodeName: nodeName,
+          docIds: allIds,
+          copiedAt: Date.now(),
+        });
+
+        messageApi.success({
+          content: `已复制 ${allIds.length} 个文档ID（来自「${nodeName}」）`,
+          key: messageKey,
+        });
+      } catch (error) {
+        messageApi.error({
+          content: "复制失败：" + (error as Error).message,
+          key: messageKey,
+        });
+      }
+    },
+    [messageApi],
+  );
+
+  /** 将剪贴板中的文档 ID 批量关联为当前节点及其子孙节点的源文档 */
+  const handlePasteAsSourceDocs = useCallback(
+    async (nodeId: number) => {
+      const messageKey = "paste-source-docs";
+
+      if (!docClipboard || docClipboard.docIds.length === 0) {
+        messageApi.warning("文档剪贴板为空，请先使用「复制子树文档ID」");
+        return;
+      }
+
+      // 收集目标节点及其所有子孙节点
+      const collectDescendantIds = (id: number): number[] => {
+        const result = [id];
+        const children = lookups.parentToChildren.get(id) ?? [];
+        for (const child of children) {
+          result.push(...collectDescendantIds(child.id));
+        }
+        return result;
+      };
+      const targetNodeIds = collectDescendantIds(nodeId);
+      const targetNodeName = lookups.byId.get(nodeId)?.name ?? String(nodeId);
+
+      // 计算总操作数
+      const totalOperations = targetNodeIds.length * docClipboard.docIds.length;
+
+      // 数量较大时二次确认
+      if (totalOperations > 10) {
+        const confirmed = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: "确认关联源文档",
+            content: `即将为「${targetNodeName}」及其 ${targetNodeIds.length - 1} 个子孙节点关联 ${docClipboard.docIds.length} 个源文档（共 ${totalOperations} 次操作），是否继续？`,
+            okText: "继续",
+            cancelText: "取消",
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+
+        if (!confirmed) {
+          messageApi.info({ content: "已取消", key: messageKey });
+          return;
+        }
+      }
+
+      setIsMutating(true);
+      messageApi.open({
+        type: "loading",
+        content: `正在为 ${targetNodeIds.length} 个节点关联源文档...`,
+        key: messageKey,
+        duration: 0,
+      });
+
+      try {
+        let successCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+
+        // 对每个目标节点执行绑定
+        for (const targetId of targetNodeIds) {
+          // 获取该节点已有的源文档进行去重
+          const existingSources = await getNodeSourceDocuments(targetId);
+          const existingIds = new Set(existingSources.map((s) => s.document_id));
+          const toBindIds = docClipboard.docIds.filter((id) => !existingIds.has(id));
+
+          // 批量绑定
+          for (const docId of toBindIds) {
+            try {
+              await bindSourceDocument(targetId, docId);
+              successCount++;
+            } catch (e: unknown) {
+              const errMsg = (e as Error).message ?? "";
+              if (errMsg.includes("already exists") || errMsg.includes("已存在")) {
+                skippedCount++;
+              } else {
+                failedCount++;
+              }
+            }
+          }
+
+          // 跳过已存在的
+          skippedCount += existingIds.size;
+        }
+
+        // 刷新查询
+        await onInvalidateQueries();
+
+        // 显示结果
+        const parts: string[] = [`已为 ${targetNodeIds.length} 个节点关联 ${successCount} 个源文档`];
+        if (skippedCount > 0) {
+          parts.push(`${skippedCount} 个已存在`);
+        }
+        if (failedCount > 0) {
+          parts.push(`${failedCount} 个失败`);
+        }
+
+        if (failedCount > 0) {
+          messageApi.warning({ content: parts.join("，"), key: messageKey });
+        } else {
+          messageApi.success({ content: parts.join("，"), key: messageKey });
+        }
+      } catch (error) {
+        messageApi.error({
+          content: "关联失败：" + (error as Error).message,
+          key: messageKey,
+        });
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [docClipboard, lookups, messageApi, onInvalidateQueries, setIsMutating],
   );
 
   const { handlePasteAsChild, handlePasteBefore, handlePasteAfter } = useTreePaste({
@@ -537,6 +727,17 @@ export function CategoryTreePanel({
           );
         },
       });
+
+      // 复制子树文档ID - 所有用户都可以使用
+      items.push({
+        key: "copy-subtree-doc-ids",
+        icon: <CopyOutlined />,
+        label: "复制子树文档ID",
+        onClick: () => {
+          closeContextMenu("action:copy-subtree-doc-ids");
+          handleCopySubtreeDocIds(nodeId, targetNode.name);
+        },
+      });
     }
 
     if (resolvedSelectionAvailable) {
@@ -647,6 +848,19 @@ export function CategoryTreePanel({
           },
         },
       );
+      // 粘贴为源文档 - 仅在有文档剪贴板时显示
+      if (docClipboard && docClipboard.docIds.length > 0) {
+        items.push({
+          key: "paste-source-docs",
+          icon: <LinkOutlined />,
+          label: `粘贴为源文档（${docClipboard.docIds.length}个）`,
+          disabled: isMutating,
+          onClick: () => {
+            closeContextMenu("action:paste-source-docs");
+            handlePasteAsSourceDocs(nodeId);
+          },
+        });
+      }
       items.push({ type: "divider" });
       items.push({
         key: "clear-clipboard",
@@ -655,6 +869,30 @@ export function CategoryTreePanel({
         onClick: () => {
           closeContextMenu("action:clear-clipboard");
           clearClipboard();
+          setDocClipboard(null); // 同时清空文档剪贴板
+        },
+      });
+    } else if (canManageCategories && docClipboard && docClipboard.docIds.length > 0) {
+      // 没有目录剪贴板，但有文档剪贴板时也显示粘贴为源文档
+      items.push({ type: "divider" });
+      items.push({
+        key: "paste-source-docs",
+        icon: <LinkOutlined />,
+        label: `粘贴为源文档（${docClipboard.docIds.length}个）`,
+        disabled: isMutating,
+        onClick: () => {
+          closeContextMenu("action:paste-source-docs");
+          handlePasteAsSourceDocs(nodeId);
+        },
+      });
+      items.push({
+        key: "clear-doc-clipboard",
+        icon: <ClearOutlined />,
+        label: "清空文档剪贴板",
+        onClick: () => {
+          closeContextMenu("action:clear-doc-clipboard");
+          setDocClipboard(null);
+          messageApi.success("已清空文档剪贴板");
         },
       });
     }
@@ -686,12 +924,15 @@ export function CategoryTreePanel({
     clipboardSourceSet,
     clearClipboard,
     closeContextMenu,
+    docClipboard,
     handleCopySelection,
+    handleCopySubtreeDocIds,
     handleCutSelection,
     handleCreateChild,
     handleRenameNode,
     handlePasteAfter,
     handlePasteAsChild,
+    handlePasteAsSourceDocs,
     handlePasteBefore,
     handleDeleteSelection,
     isDescendantOrSelf,
@@ -910,6 +1151,11 @@ export function CategoryTreePanel({
       {clipboard ? (
         <Tag color={clipboard.mode === "cut" ? "orange" : "blue"} style={{ marginBottom: 16 }}>
           剪贴板：{clipboard.mode === "cut" ? "剪切" : "复制"} {clipboard.sourceIds.length} 项
+        </Tag>
+      ) : null}
+      {docClipboard ? (
+        <Tag color="green" style={{ marginBottom: 16, marginLeft: clipboard ? 8 : 0 }}>
+          文档剪贴板：{docClipboard.docIds.length} 个（来自「{docClipboard.sourceNodeName}」）
         </Tag>
       ) : null}
       <div style={PANEL_BODY_STYLE}>{bodyContent}</div>
