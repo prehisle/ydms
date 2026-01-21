@@ -192,3 +192,97 @@ type WorkflowRun struct {
 func (WorkflowRun) TableName() string {
 	return "workflow_runs"
 }
+
+// BatchStatus 批次执行状态常量
+const (
+	BatchStatusPending   = "pending"
+	BatchStatusRunning   = "running"
+	BatchStatusCompleted = "completed"
+	BatchStatusFailed    = "failed"
+	BatchStatusCancelled = "cancelled"
+)
+
+// WorkflowBatch 批量工作流批次模型
+// 记录批量执行工作流的批次信息
+type WorkflowBatch struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// 批次标识
+	BatchID string `gorm:"uniqueIndex;not null;size:64" json:"batch_id"` // UUID
+
+	// 工作流配置
+	WorkflowKey string `gorm:"not null;size:64;index" json:"workflow_key"` // 工作流类型
+	RootNodeID  int64  `gorm:"not null;index" json:"root_node_id"`         // 起始节点 ID
+
+	// 执行状态: pending, running, completed, failed, cancelled
+	Status string `gorm:"not null;size:32;default:'pending';index" json:"status"`
+
+	// 统计信息
+	TotalNodes   int `gorm:"not null;default:0" json:"total_nodes"`   // 总节点数
+	SuccessCount int `gorm:"not null;default:0" json:"success_count"` // 成功数
+	FailedCount  int `gorm:"not null;default:0" json:"failed_count"`  // 失败数
+	SkippedCount int `gorm:"not null;default:0" json:"skipped_count"` // 跳过数
+
+	// 执行详情 - 记录每个节点的执行结果
+	Details JSONMap `gorm:"type:jsonb;default:'{}'" json:"details,omitempty"`
+
+	// 错误信息
+	ErrorMessage string `gorm:"type:text" json:"error_message,omitempty"`
+
+	// 触发者
+	CreatedByID *uint `gorm:"index" json:"created_by_id,omitempty"`
+	CreatedBy   *User `gorm:"foreignKey:CreatedByID" json:"created_by,omitempty"`
+
+	// 时间戳
+	StartedAt  *time.Time `json:"started_at,omitempty"`  // 开始时间
+	FinishedAt *time.Time `json:"finished_at,omitempty"` // 完成时间
+}
+
+// TableName 指定表名
+func (WorkflowBatch) TableName() string {
+	return "workflow_batches"
+}
+
+// SyncBatch 批量同步批次模型
+// 记录批量同步文档到外部 MySQL 的批次信息
+type SyncBatch struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// 批次标识
+	BatchID string `gorm:"uniqueIndex;not null;size:64" json:"batch_id"` // UUID
+
+	// 同步配置
+	RootNodeID int64 `gorm:"not null;index" json:"root_node_id"` // 起始节点 ID
+
+	// 执行状态: pending, running, completed, failed, cancelled
+	Status string `gorm:"not null;size:32;default:'pending';index" json:"status"`
+
+	// 统计信息
+	TotalDocuments int `gorm:"not null;default:0" json:"total_documents"` // 总文档数
+	SuccessCount   int `gorm:"not null;default:0" json:"success_count"`   // 成功数
+	FailedCount    int `gorm:"not null;default:0" json:"failed_count"`    // 失败数
+	SkippedCount   int `gorm:"not null;default:0" json:"skipped_count"`   // 跳过数
+
+	// 执行详情 - 记录每个文档的同步结果
+	Details JSONMap `gorm:"type:jsonb;default:'{}'" json:"details,omitempty"`
+
+	// 错误信息
+	ErrorMessage string `gorm:"type:text" json:"error_message,omitempty"`
+
+	// 触发者
+	CreatedByID *uint `gorm:"index" json:"created_by_id,omitempty"`
+	CreatedBy   *User `gorm:"foreignKey:CreatedByID" json:"created_by,omitempty"`
+
+	// 时间戳
+	StartedAt  *time.Time `json:"started_at,omitempty"`  // 开始时间
+	FinishedAt *time.Time `json:"finished_at,omitempty"` // 完成时间
+}
+
+// TableName 指定表名
+func (SyncBatch) TableName() string {
+	return "sync_batches"
+}

@@ -126,6 +126,10 @@ func runServer() error {
 	// 创建 Workflow Sync 服务（用于管理 API）
 	workflowSyncService := service.NewWorkflowSyncService(db, prefect, prefect != nil)
 
+	// 创建批量操作服务
+	batchWorkflowService := service.NewBatchWorkflowService(db, ndr, workflowService)
+	batchSyncService := service.NewBatchSyncService(db, ndr, syncService)
+
 	// 创建 handlers
 	headerDefaults := api.HeaderDefaults{
 		APIKey:   cfg.NDR.APIKey,
@@ -141,6 +145,7 @@ func runServer() error {
 	syncHandler := api.NewSyncHandler(syncService, cfg.Prefect.WebhookSecret)
 	workflowHandler := api.NewWorkflowHandler(workflowService, handler)
 	adminWorkflowHandler := api.NewAdminWorkflowHandler(workflowSyncService)
+	batchHandler := api.NewBatchHandler(batchWorkflowService, batchSyncService)
 
 	// 创建静态资源代理（如果配置了 MinIO URL）
 	var staticProxyHandler *api.StaticProxyHandler
@@ -165,6 +170,7 @@ func runServer() error {
 		SyncHandler:          syncHandler,
 		WorkflowHandler:      workflowHandler,
 		AdminWorkflowHandler: adminWorkflowHandler,
+		BatchHandler:         batchHandler,
 		StaticProxyHandler:   staticProxyHandler,
 		JWTSecret:            cfg.JWT.Secret,
 		DB:                   db, // 传递 DB 用于 API Key 验证

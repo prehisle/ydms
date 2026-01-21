@@ -51,7 +51,7 @@ func AutoMigrateWithDefaults(db *gorm.DB, defaults AdminDefaults) error {
 
 	// 使用原始的 db（已在 Connect 时配置）迁移所有表
 	// 注意：我们在手动创建外键约束，所以不依赖 GORM 自动创建
-	err := db.AutoMigrate(&User{}, &CoursePermission{}, &APIKey{}, &DocSyncStatus{}, &WorkflowDefinition{}, &WorkflowRun{})
+	err := db.AutoMigrate(&User{}, &CoursePermission{}, &APIKey{}, &DocSyncStatus{}, &WorkflowDefinition{}, &WorkflowRun{}, &WorkflowBatch{}, &SyncBatch{})
 	if err != nil {
 		return fmt.Errorf("failed to migrate tables: %w", err)
 	}
@@ -123,6 +123,40 @@ func AutoMigrateWithDefaults(db *gorm.DB, defaults AdminDefaults) error {
 	`).Error
 	if err != nil {
 		log.Printf("Warning: failed to create workflow_runs.created_by FK: %v", err)
+	}
+
+	// WorkflowBatch.CreatedBy -> User.ID
+	err = db.Exec(`
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM information_schema.table_constraints
+				WHERE constraint_name = 'fk_workflow_batches_created_by' AND table_name = 'workflow_batches'
+			) THEN
+				ALTER TABLE workflow_batches ADD CONSTRAINT fk_workflow_batches_created_by
+				FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL;
+			END IF;
+		END$$;
+	`).Error
+	if err != nil {
+		log.Printf("Warning: failed to create workflow_batches.created_by FK: %v", err)
+	}
+
+	// SyncBatch.CreatedBy -> User.ID
+	err = db.Exec(`
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM information_schema.table_constraints
+				WHERE constraint_name = 'fk_sync_batches_created_by' AND table_name = 'sync_batches'
+			) THEN
+				ALTER TABLE sync_batches ADD CONSTRAINT fk_sync_batches_created_by
+				FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL;
+			END IF;
+		END$$;
+	`).Error
+	if err != nil {
+		log.Printf("Warning: failed to create sync_batches.created_by FK: %v", err)
 	}
 
 	log.Println("Database migrations completed successfully")

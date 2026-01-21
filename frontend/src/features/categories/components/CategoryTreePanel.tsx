@@ -20,6 +20,8 @@ import {
   PlusSquareOutlined,
   EditOutlined,
   LinkOutlined,
+  ThunderboltOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 
 import type { Category } from "../../../api/categories";
@@ -113,6 +115,8 @@ export interface CategoryTreePanelProps {
   onInvalidateQueries: () => Promise<void>;
   setIsMutating: (value: boolean) => void;
   onDocumentDrop?: (targetNodeId: number, dragData: any) => void;
+  onOpenBatchWorkflow?: (nodeId: number, nodeName: string) => void;
+  onOpenBatchSync?: (nodeId: number, nodeName: string) => void;
 }
 
 export function CategoryTreePanel({
@@ -145,6 +149,8 @@ export function CategoryTreePanel({
   onInvalidateQueries,
   setIsMutating,
   onDocumentDrop,
+  onOpenBatchWorkflow,
+  onOpenBatchSync,
 }: CategoryTreePanelProps) {
   const [searchValue, setSearchValue] = useState("");
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
@@ -696,8 +702,38 @@ export function CategoryTreePanel({
       });
     }
 
-    // 复制节点路径 - 所有用户都可以使用
+    // 批量操作菜单项 - 仅管理员可用
     const targetNode = lookups.byId.get(nodeId);
+    if (canManageCategories && targetNode) {
+      items.push({ type: "divider" });
+      if (onOpenBatchWorkflow) {
+        items.push({
+          key: "batch-workflow",
+          icon: <ThunderboltOutlined />,
+          label: "批量执行工作流",
+          disabled: isMutating,
+          onClick: () => {
+            closeContextMenu("action:batch-workflow");
+            onOpenBatchWorkflow(nodeId, targetNode.name);
+          },
+        });
+      }
+      if (onOpenBatchSync) {
+        items.push({
+          key: "batch-sync",
+          icon: <SyncOutlined />,
+          label: "批量同步文档",
+          disabled: isMutating,
+          onClick: () => {
+            closeContextMenu("action:batch-sync");
+            onOpenBatchSync(nodeId, targetNode.name);
+          },
+        });
+      }
+      items.push({ type: "divider" });
+    }
+
+    // 复制节点路径 - 所有用户都可以使用
     if (targetNode?.path) {
       items.push({
         key: "copy-path",
@@ -941,6 +977,8 @@ export function CategoryTreePanel({
     messageApi,
     lookups,
     onOpenAddDocument,
+    onOpenBatchWorkflow,
+    onOpenBatchSync,
     selectedIds,
     selectionParentId,
     contextMenu,

@@ -57,6 +57,7 @@ import { DocumentTrashDrawer } from "./features/documents/components/DocumentTra
 import { DocumentReorderModal } from "./features/documents/components/DocumentReorderModal";
 import { SourceDocumentManager } from "./features/documents/components/SourceDocumentManager";
 import { WorkflowManager } from "./features/workflows";
+import { BatchWorkflowModal, BatchSyncModal } from "./features/batch";
 import { StatusBar } from "./components/StatusBar";
 import { useDocumentDrag } from "./features/documents/hooks/useDocumentDrag";
 import { useTreeSiderState } from "./features/categories/hooks/useTreeSiderState";
@@ -475,6 +476,35 @@ export const DocumentsPage = () => {
   // 文档复制状态
   const [copyingDocId, setCopyingDocId] = useState<number | null>(null);
 
+  // 批量操作弹窗状态
+  const [batchWorkflowModal, setBatchWorkflowModal] = useState<{
+    open: boolean;
+    nodeId: number;
+    nodeName: string;
+  }>({ open: false, nodeId: 0, nodeName: "" });
+
+  const [batchSyncModal, setBatchSyncModal] = useState<{
+    open: boolean;
+    nodeId: number;
+    nodeName: string;
+  }>({ open: false, nodeId: 0, nodeName: "" });
+
+  const handleOpenBatchWorkflow = useCallback((nodeId: number, nodeName: string) => {
+    setBatchWorkflowModal({ open: true, nodeId, nodeName });
+  }, []);
+
+  const handleCloseBatchWorkflow = useCallback(() => {
+    setBatchWorkflowModal((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const handleOpenBatchSync = useCallback((nodeId: number, nodeName: string) => {
+    setBatchSyncModal({ open: true, nodeId, nodeName });
+  }, []);
+
+  const handleCloseBatchSync = useCallback(() => {
+    setBatchSyncModal((prev) => ({ ...prev, open: false }));
+  }, []);
+
   const handleCopyDocument = useCallback(
     async (doc: Document) => {
       setCopyingDocId(doc.id);
@@ -756,6 +786,8 @@ export const DocumentsPage = () => {
     onInvalidateQueries: invalidateCategoryQueries,
     setIsMutating: setMutating,
     onDocumentDrop: handleDropOnNode,
+    onOpenBatchWorkflow: handleOpenBatchWorkflow,
+    onOpenBatchSync: handleOpenBatchSync,
   };
 
   const breadcrumbProps: CategoryBreadcrumbProps = {
@@ -978,6 +1010,20 @@ export const DocumentsPage = () => {
       />
       <UserManagementDrawer open={userManagementOpen} onClose={handleCloseUserManagement} />
       <APIKeyManagementDrawer open={apiKeyManagementOpen} onClose={handleCloseAPIKeyManagement} />
+      <BatchWorkflowModal
+        open={batchWorkflowModal.open}
+        nodeId={batchWorkflowModal.nodeId}
+        nodeName={batchWorkflowModal.nodeName}
+        onClose={handleCloseBatchWorkflow}
+        onSuccess={invalidateAllQueries}
+      />
+      <BatchSyncModal
+        open={batchSyncModal.open}
+        nodeId={batchSyncModal.nodeId}
+        nodeName={batchSyncModal.nodeName}
+        onClose={handleCloseBatchSync}
+        onSuccess={invalidateAllQueries}
+      />
     </Layout>
   );
 };

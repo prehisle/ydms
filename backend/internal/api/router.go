@@ -25,6 +25,7 @@ type RouterConfig struct {
 	SyncHandler          *SyncHandler
 	WorkflowHandler      *WorkflowHandler
 	AdminWorkflowHandler *AdminWorkflowHandler
+	BatchHandler         *BatchHandler // 批量操作处理器
 	StaticProxyHandler   *StaticProxyHandler
 	JWTSecret            string
 	DB                   *gorm.DB // 用于 API Key 验证
@@ -99,10 +100,10 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 	} else {
 		mux.Handle("/api/v1/documents/", authWrap(http.HandlerFunc(cfg.Handler.DocumentRoutes)))
 	}
-	// 节点路由：如果有 WorkflowHandler，使用组合处理器
-	if cfg.WorkflowHandler != nil {
+	// 节点路由：如果有 WorkflowHandler 或 BatchHandler，使用组合处理器
+	if cfg.WorkflowHandler != nil || cfg.BatchHandler != nil {
 		mux.Handle("/api/v1/nodes/", authWrap(http.HandlerFunc(
-			combineNodeAndWorkflowRoutes(cfg.Handler, cfg.WorkflowHandler),
+			combineNodeRoutes(cfg.Handler, cfg.WorkflowHandler, cfg.BatchHandler),
 		)))
 	} else {
 		mux.Handle("/api/v1/nodes/", authWrap(http.HandlerFunc(cfg.Handler.NodeRoutes)))
@@ -140,6 +141,16 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 		mux.Handle("/api/v1/admin/workflows/sync", authWrap(http.HandlerFunc(cfg.AdminWorkflowHandler.TriggerSync)))
 		mux.Handle("/api/v1/admin/workflows", authWrap(http.HandlerFunc(cfg.AdminWorkflowHandler.ListWorkflowDefinitions)))
 		mux.Handle("/api/v1/admin/workflows/", authWrap(http.HandlerFunc(handleAdminWorkflowRoutes(cfg.AdminWorkflowHandler))))
+	}
+
+	// 批量操作端点（需要认证）
+	if cfg.BatchHandler != nil {
+		// 批量工作流
+		mux.Handle("/api/v1/workflows/batches", authWrap(http.HandlerFunc(cfg.BatchHandler.BatchWorkflowRoutes)))
+		mux.Handle("/api/v1/workflows/batches/", authWrap(http.HandlerFunc(cfg.BatchHandler.BatchWorkflowRoutes)))
+		// 批量同步
+		mux.Handle("/api/v1/sync/batches", authWrap(http.HandlerFunc(cfg.BatchHandler.BatchSyncRoutes)))
+		mux.Handle("/api/v1/sync/batches/", authWrap(http.HandlerFunc(cfg.BatchHandler.BatchSyncRoutes)))
 	}
 
 	// 静态资源代理（/ndr-assets/* -> MinIO）
@@ -420,5 +431,64 @@ func handleAdminWorkflowRoutes(h *AdminWorkflowHandler) http.HandlerFunc {
 		}
 
 		respondError(w, http.StatusNotFound, errors.New("not found"))
+	}
+}
+
+// combineNodeRoutes 组合节点路由、工作流路由和批量操作路由
+// 根据路径判断是否是工作流或批量操作相关请求，分发到对应的处理器
+func combineNodeRoutes(h *Handler, wh *WorkflowHandler, bh *BatchHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		relPath := strings.TrimPrefix(path, "/api/v1/nodes/")
+
+		// 解析节点 ID
+		parts := strings.Split(relPath, "/")
+		if len(parts) < 2 {
+			h.NodeRoutes(w, r)
+			return
+		}
+
+		nodeID, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, errors.New("invalid node id"))
+			return
+		}
+
+		// 检查是否是批量操作相关路由
+		// /api/v1/nodes/{id}/workflows/batch/*
+		// /api/v1/nodes/{id}/sync/batch/*
+		if bh != nil {
+			if len(parts) >= 4 && parts[1] == "workflows" && parts[2] == "batch" {
+				bh.handleNodeBatchWorkflow(w, r)
+				return
+			}
+			if len(parts) >= 4 && parts[1] == "sync" && parts[2] == "batch" {
+				bh.handleNodeBatchSync(w, r)
+				return
+			}
+		}
+
+		// 检查是否是工作流相关路由
+		// /api/v1/nodes/{id}/workflows
+		// /api/v1/nodes/{id}/workflows/{workflowKey}/runs
+		// /api/v1/nodes/{id}/workflow-runs
+		if wh != nil {
+			if parts[1] == "workflows" {
+				subPath := ""
+				if len(parts) > 2 {
+					subPath = strings.Join(parts[2:], "/")
+				}
+				wh.NodeWorkflowRoutes(w, r, nodeID, subPath)
+				return
+			}
+
+			if parts[1] == "workflow-runs" {
+				wh.NodeWorkflowRoutes(w, r, nodeID, "-runs")
+				return
+			}
+		}
+
+		// 其他路由交给原来的节点处理器
+		h.NodeRoutes(w, r)
 	}
 }
