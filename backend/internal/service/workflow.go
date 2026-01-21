@@ -115,9 +115,10 @@ func (s *WorkflowService) GetWorkflowDefinition(ctx context.Context, workflowKey
 
 // TriggerWorkflowRequest represents a request to trigger a workflow on a node.
 type TriggerWorkflowRequest struct {
-	NodeID      int64                  `json:"node_id"`
-	WorkflowKey string                 `json:"workflow_key"`
-	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+	NodeID       int64                  `json:"node_id"`
+	WorkflowKey  string                 `json:"workflow_key"`
+	Parameters   map[string]interface{} `json:"parameters,omitempty"`
+	SourceDocIDs []int64                `json:"-"` // 预获取的源文档 ID（内部使用，跳过重复查询）
 }
 
 // TriggerDocumentWorkflowRequest represents a request to trigger a workflow on a document.
@@ -158,14 +159,26 @@ func (s *WorkflowService) TriggerWorkflow(
 	}
 
 	// 2. Verify node exists and get source documents
-	sources, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), req.NodeID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get source documents: %w", err)
+	var sourceDocIDs []int64
+
+	if len(req.SourceDocIDs) > 0 {
+		// 使用预获取的源文档 ID（批量执行优化）
+		sourceDocIDs = req.SourceDocIDs
+	} else {
+		// 查询源文档
+		sources, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), req.NodeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get source documents: %w", err)
+		}
+		sourceDocIDs = make([]int64, len(sources))
+		for i, src := range sources {
+			sourceDocIDs[i] = src.DocumentID
+		}
 	}
 
 	// 3. Get target documents (node's direct documents) for generate_node_documents workflow
 	var targetDocs []map[string]interface{}
-	if req.WorkflowKey == "generate_node_documents" || req.WorkflowKey == "generate_node_documents_v2" || req.WorkflowKey == "generate_node_documents_v3" || req.WorkflowKey == "generate_node_documents_exercises" {
+	if req.WorkflowKey == "generate_node_documents" || req.WorkflowKey == "generate_node_documents_v2" || req.WorkflowKey == "generate_node_documents_v3" || req.WorkflowKey == "generate_node_documents_v4" || req.WorkflowKey == "generate_node_documents_exercises" {
 		query := url.Values{}
 		query.Set("include_descendants", "false")
 		query.Set("size", "100")
@@ -175,15 +188,15 @@ func (s *WorkflowService) TriggerWorkflow(
 		}
 
 		// Build source document ID set for filtering
-		sourceDocIDs := make(map[int64]bool)
-		for _, src := range sources {
-			sourceDocIDs[src.DocumentID] = true
+		sourceDocIDSet := make(map[int64]bool)
+		for _, id := range sourceDocIDs {
+			sourceDocIDSet[id] = true
 		}
 
 		// Filter out source documents from target docs
 		for _, doc := range docsPage.Items {
 			// Skip source documents - they are inputs, not outputs
-			if sourceDocIDs[doc.ID] {
+			if sourceDocIDSet[doc.ID] {
 				continue
 			}
 			docType := ""
@@ -238,12 +251,6 @@ func (s *WorkflowService) TriggerWorkflow(
 
 	// 7. Build flow parameters
 	callbackURL := fmt.Sprintf("%s/api/v1/workflows/callback/%d", s.pdmsBaseURL, run.ID)
-
-	// Collect source document IDs
-	sourceDocIDs := make([]int64, len(sources))
-	for i, src := range sources {
-		sourceDocIDs[i] = src.DocumentID
-	}
 
 	flowParams := map[string]interface{}{
 		"run_id":         run.ID,
@@ -554,6 +561,14 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 			Name:                  "生成节点文档(V3)",
 			Description:           "V3版本：新增规划阶段、灰度SVG、禁止emoji、必背融合到正文",
 			PrefectDeploymentName: "node-generate-documents-v3-deployment",
+			ParameterSchema:       database.JSONMap{},
+			Enabled:               true,
+		},
+		{
+			WorkflowKey:           "generate_node_documents_v4",
+			Name:                  "生成节点文档(V4)",
+			Description:           "V4版本：单轮生成、简化提示词、内嵌SVG、轻量验证，Token效率提升70%",
+			PrefectDeploymentName: "node-generate-documents-v4-deployment",
 			ParameterSchema:       database.JSONMap{},
 			Enabled:               true,
 		},

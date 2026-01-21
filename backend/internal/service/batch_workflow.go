@@ -317,6 +317,7 @@ func (s *BatchWorkflowService) executeBatchAsync(
 			}
 
 			// 检查是否需要跳过
+			var sourceDocIDs []int64
 			if req.SkipNoSource {
 				sources, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), n.ID)
 				if err != nil {
@@ -337,13 +338,19 @@ func (s *BatchWorkflowService) executeBatchAsync(
 					mu.Unlock()
 					return
 				}
+				// 保存源文档 ID，传递给 TriggerWorkflow 避免重复查询
+				sourceDocIDs = make([]int64, len(sources))
+				for i, src := range sources {
+					sourceDocIDs[i] = src.DocumentID
+				}
 			}
 
 			// 执行工作流
 			triggerReq := TriggerWorkflowRequest{
-				NodeID:      n.ID,
-				WorkflowKey: req.WorkflowKey,
-				Parameters:  req.Parameters,
+				NodeID:       n.ID,
+				WorkflowKey:  req.WorkflowKey,
+				Parameters:   req.Parameters,
+				SourceDocIDs: sourceDocIDs,
 			}
 
 			resp, err := s.workflowService.TriggerWorkflow(ctx, meta, triggerReq)
