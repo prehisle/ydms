@@ -147,7 +147,7 @@ func (s *SyncService) TriggerSync(
 		return nil, errors.New("sync_target not configured in document metadata")
 	}
 
-	// 3. 生成幂等性 key（与 ProcessingService 保持一致）
+	// 3. 生成幂等性 key
 	idempotencyKey := generateSyncIdempotencyKey(docID, docVersion)
 
 	// 4. 检查是否已有进行中的同步任务

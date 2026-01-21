@@ -33,6 +33,22 @@ type DeploymentInfo struct {
 	Name string `json:"name"`
 }
 
+// DeploymentDetails represents detailed information about a Prefect Deployment.
+type DeploymentDetails struct {
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	Version           string                 `json:"version,omitempty"`
+	Description       string                 `json:"description,omitempty"`
+	Tags              []string               `json:"tags,omitempty"`
+	Parameters        map[string]interface{} `json:"parameters,omitempty"`
+	ParameterSchema   map[string]interface{} `json:"parameter_openapi_schema,omitempty"`
+	FlowID            string                 `json:"flow_id,omitempty"`
+	Entrypoint        string                 `json:"entrypoint,omitempty"`
+	WorkPoolName      string                 `json:"work_pool_name,omitempty"`
+	CreatedAt         string                 `json:"created,omitempty"`
+	UpdatedAt         string                 `json:"updated,omitempty"`
+}
+
 // FlowRunResponse represents a Prefect Flow Run.
 type FlowRunResponse struct {
 	ID        string         `json:"id"`
@@ -183,4 +199,81 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// ListDeployments lists all deployments, optionally filtered by tags.
+func (c *Client) ListDeployments(ctx context.Context, tagFilters []string) ([]DeploymentDetails, error) {
+	url := fmt.Sprintf("%s/api/deployments/filter", c.baseURL)
+
+	// Build filter body
+	body := map[string]interface{}{
+		"limit":  100, // Get up to 100 deployments
+		"offset": 0,
+	}
+
+	// Add tag filter if specified
+	if len(tagFilters) > 0 {
+		body["deployments"] = map[string]interface{}{
+			"tags": map[string]interface{}{
+				"any_": tagFilters,
+			},
+		}
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list deployments: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list deployments failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var deployments []DeploymentDetails
+	if err := json.NewDecoder(resp.Body).Decode(&deployments); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return deployments, nil
+}
+
+// GetDeployment gets a single deployment by ID.
+func (c *Client) GetDeployment(ctx context.Context, deploymentID string) (*DeploymentDetails, error) {
+	url := fmt.Sprintf("%s/api/deployments/%s", c.baseURL, deploymentID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get deployment: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get deployment failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var deployment DeploymentDetails
+	if err := json.NewDecoder(resp.Body).Decode(&deployment); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &deployment, nil
 }

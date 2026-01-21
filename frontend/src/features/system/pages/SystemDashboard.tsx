@@ -7,6 +7,7 @@ import {
   SettingOutlined,
   FileSearchOutlined,
   HeartOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -82,6 +83,12 @@ export const SystemDashboard: FC = () => {
       description: "创建和管理 API 访问密钥",
       icon: <KeyOutlined style={{ fontSize: 24, color: "#52c41a" }} />,
       to: "/system/api-keys",
+    },
+    {
+      title: "工作流管理",
+      description: "查看和管理 Prefect 工作流同步",
+      icon: <SyncOutlined style={{ fontSize: 24, color: "#13c2c2" }} />,
+      to: "/system/workflows",
     },
     {
       title: "系统配置",

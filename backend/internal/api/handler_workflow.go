@@ -107,8 +107,8 @@ func (h *WorkflowHandler) listWorkflowDefinitions(w http.ResponseWriter, r *http
 
 // listNodeWorkflows handles GET /api/v1/nodes/{id}/workflows
 func (h *WorkflowHandler) listNodeWorkflows(w http.ResponseWriter, r *http.Request) {
-	// 返回所有可用的工作流定义
-	definitions, err := h.workflowService.ListWorkflowDefinitions(r.Context())
+	// 返回所有可用的节点工作流定义
+	definitions, err := h.workflowService.ListWorkflowDefinitionsByType(r.Context(), "node")
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err)
 		return
@@ -182,6 +182,13 @@ func (h *WorkflowHandler) listWorkflowRuns(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	if documentIDStr := r.URL.Query().Get("document_id"); documentIDStr != "" {
+		documentID, err := strconv.ParseInt(documentIDStr, 10, 64)
+		if err == nil {
+			params.DocumentID = &documentID
+		}
+	}
+
 	if workflowKey := r.URL.Query().Get("workflow_key"); workflowKey != "" {
 		params.WorkflowKey = &workflowKey
 	}
@@ -234,4 +241,91 @@ func (h *WorkflowHandler) handleCallback(w http.ResponseWriter, r *http.Request,
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// DocumentWorkflowRoutes handles /api/v1/documents/{id}/workflows/* routes.
+func (h *WorkflowHandler) DocumentWorkflowRoutes(w http.ResponseWriter, r *http.Request, docID int64, subPath string) {
+	meta := h.handler.metaFromRequest(r)
+
+	// GET /api/v1/documents/{id}/workflows - list available workflows for document
+	if subPath == "" && r.Method == http.MethodGet {
+		h.listDocumentWorkflows(w, r)
+		return
+	}
+
+	// GET /api/v1/documents/{id}/workflow-runs - list workflow runs for document
+	if subPath == "-runs" && r.Method == http.MethodGet {
+		h.listDocumentWorkflowRuns(w, r, docID)
+		return
+	}
+
+	// POST /api/v1/documents/{id}/workflows/{workflowKey}/runs - trigger workflow
+	parts := strings.Split(subPath, "/")
+	if len(parts) == 2 && parts[1] == "runs" && r.Method == http.MethodPost {
+		workflowKey := parts[0]
+		h.triggerDocumentWorkflow(w, r, meta, docID, workflowKey)
+		return
+	}
+
+	respondError(w, http.StatusNotFound, errors.New("not found"))
+}
+
+// listDocumentWorkflows handles GET /api/v1/documents/{id}/workflows
+func (h *WorkflowHandler) listDocumentWorkflows(w http.ResponseWriter, r *http.Request) {
+	// 返回所有可用的文档工作流定义
+	definitions, err := h.workflowService.ListWorkflowDefinitionsByType(r.Context(), "document")
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, definitions)
+}
+
+// triggerDocumentWorkflow handles POST /api/v1/documents/{id}/workflows/{workflowKey}/runs
+func (h *WorkflowHandler) triggerDocumentWorkflow(w http.ResponseWriter, r *http.Request, meta service.RequestMeta, docID int64, workflowKey string) {
+	var params struct {
+		Parameters map[string]interface{} `json:"parameters"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil && err.Error() != "EOF" {
+		respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "请求格式错误", err.Error()))
+		return
+	}
+
+	req := service.TriggerDocumentWorkflowRequest{
+		DocumentID:  docID,
+		WorkflowKey: workflowKey,
+		Parameters:  params.Parameters,
+	}
+
+	resp, err := h.workflowService.TriggerDocumentWorkflow(r.Context(), meta, req)
+	if err != nil {
+		respondAPIError(w, WrapUpstreamError(err))
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// listDocumentWorkflowRuns handles GET /api/v1/documents/{id}/workflow-runs
+func (h *WorkflowHandler) listDocumentWorkflowRuns(w http.ResponseWriter, r *http.Request, docID int64) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	params := service.ListWorkflowRunsParams{
+		DocumentID: &docID,
+		Limit:      limit,
+		Offset:     offset,
+	}
+
+	if status := r.URL.Query().Get("status"); status != "" {
+		params.Status = strings.Split(status, ",")
+	}
+
+	resp, err := h.workflowService.ListWorkflowRuns(r.Context(), params)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

@@ -41,7 +41,6 @@ import { useDocumentContext } from "./contexts/DocumentContext";
 import { useUIContext } from "./contexts/UIContext";
 import { UserManagementDrawer } from "./features/users/UserManagementDrawer";
 import { APIKeyManagementDrawer } from "./features/apikeys/APIKeyManagementDrawer";
-import { TaskCenterDrawer } from "./features/tasks";
 import type { MainLayoutOutletContext } from "./components/Layout";
 import { Document, DocumentTrashPage, DocumentVersionsPage, copyDocument } from "./api/documents";
 import { CategoryTreePanel } from "./features/categories/components/CategoryTreePanel";
@@ -238,7 +237,6 @@ export const DocumentsPage = () => {
     reorderModal,
     userManagementOpen,
     apiKeyManagementOpen,
-    taskCenterOpen,
     handleOpenTrash,
     handleCloseTrash,
     handleOpenCreateModal,
@@ -257,8 +255,6 @@ export const DocumentsPage = () => {
     handleCloseUserManagement,
     handleOpenAPIKeyManagement,
     handleCloseAPIKeyManagement,
-    handleOpenTaskCenter,
-    handleCloseTaskCenter,
   } = useUIContext();
 
   // 刷新分类和文档查询
@@ -982,7 +978,6 @@ export const DocumentsPage = () => {
       />
       <UserManagementDrawer open={userManagementOpen} onClose={handleCloseUserManagement} />
       <APIKeyManagementDrawer open={apiKeyManagementOpen} onClose={handleCloseAPIKeyManagement} />
-      <TaskCenterDrawer open={taskCenterOpen} onClose={handleCloseTaskCenter} />
     </Layout>
   );
 };

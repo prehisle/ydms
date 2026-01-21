@@ -51,7 +51,7 @@ func AutoMigrateWithDefaults(db *gorm.DB, defaults AdminDefaults) error {
 
 	// 使用原始的 db（已在 Connect 时配置）迁移所有表
 	// 注意：我们在手动创建外键约束，所以不依赖 GORM 自动创建
-	err := db.AutoMigrate(&User{}, &CoursePermission{}, &APIKey{}, &ProcessingJob{}, &DocSyncStatus{}, &WorkflowDefinition{}, &WorkflowRun{})
+	err := db.AutoMigrate(&User{}, &CoursePermission{}, &APIKey{}, &DocSyncStatus{}, &WorkflowDefinition{}, &WorkflowRun{})
 	if err != nil {
 		return fmt.Errorf("failed to migrate tables: %w", err)
 	}
@@ -106,23 +106,6 @@ func AutoMigrateWithDefaults(db *gorm.DB, defaults AdminDefaults) error {
 	`).Error
 	if err != nil {
 		log.Printf("Warning: failed to create api_keys.created_by FK: %v", err)
-	}
-
-	// ProcessingJob.TriggeredBy -> User.ID
-	err = db.Exec(`
-		DO $$
-		BEGIN
-			IF NOT EXISTS (
-				SELECT 1 FROM information_schema.table_constraints
-				WHERE constraint_name = 'fk_processing_jobs_triggered_by' AND table_name = 'processing_jobs'
-			) THEN
-				ALTER TABLE processing_jobs ADD CONSTRAINT fk_processing_jobs_triggered_by
-				FOREIGN KEY (triggered_by_id) REFERENCES users(id) ON DELETE SET NULL;
-			END IF;
-		END$$;
-	`).Error
-	if err != nil {
-		log.Printf("Warning: failed to create processing_jobs.triggered_by FK: %v", err)
 	}
 
 	// WorkflowRun.CreatedBy -> User.ID

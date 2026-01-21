@@ -109,14 +109,11 @@ func runServer() error {
 		log.Printf("Prefect client configured: %s", cfg.Prefect.BaseURL)
 	}
 
-	// 创建 Processing 服务
+	// 创建 Sync 服务
 	pdmsBaseURL := cfg.Prefect.PublicBaseURL
 	if pdmsBaseURL == "" {
 		pdmsBaseURL = fmt.Sprintf("http://localhost:%d", cfg.HTTPPort)
 	}
-	processingService := service.NewProcessingService(db, prefect, ndr, pdmsBaseURL)
-
-	// 创建 Sync 服务
 	syncService := service.NewSyncService(db, prefect, ndr, pdmsBaseURL)
 
 	// 创建 Workflow 服务
@@ -125,6 +122,9 @@ func runServer() error {
 	if err := workflowService.EnsureDefaultWorkflows(context.Background()); err != nil {
 		log.Printf("warning: failed to ensure default workflows: %v", err)
 	}
+
+	// 创建 Workflow Sync 服务（用于管理 API）
+	workflowSyncService := service.NewWorkflowSyncService(db, prefect, prefect != nil)
 
 	// 创建 handlers
 	headerDefaults := api.HeaderDefaults{
@@ -138,9 +138,9 @@ func runServer() error {
 	courseHandler := api.NewCourseHandler(courseService)
 	apiKeyHandler := api.NewAPIKeyHandler(apiKeyService)
 	assetsHandler := api.NewAssetsHandler(svc, headerDefaults)
-	processingHandler := api.NewProcessingHandler(processingService, cfg.Prefect.WebhookSecret)
 	syncHandler := api.NewSyncHandler(syncService, cfg.Prefect.WebhookSecret)
 	workflowHandler := api.NewWorkflowHandler(workflowService, handler)
+	adminWorkflowHandler := api.NewAdminWorkflowHandler(workflowSyncService)
 
 	// 创建静态资源代理（如果配置了 MinIO URL）
 	var staticProxyHandler *api.StaticProxyHandler
@@ -156,18 +156,18 @@ func runServer() error {
 
 	// 创建路由器（使用新的配置方式）
 	router := api.NewRouterWithConfig(api.RouterConfig{
-		Handler:            handler,
-		AuthHandler:        authHandler,
-		UserHandler:        userHandler,
-		CourseHandler:      courseHandler,
-		APIKeyHandler:      apiKeyHandler,
-		AssetsHandler:      assetsHandler,
-		ProcessingHandler:  processingHandler,
-		SyncHandler:        syncHandler,
-		WorkflowHandler:    workflowHandler,
-		StaticProxyHandler: staticProxyHandler,
-		JWTSecret:          cfg.JWT.Secret,
-		DB:                 db, // 传递 DB 用于 API Key 验证
+		Handler:              handler,
+		AuthHandler:          authHandler,
+		UserHandler:          userHandler,
+		CourseHandler:        courseHandler,
+		APIKeyHandler:        apiKeyHandler,
+		AssetsHandler:        assetsHandler,
+		SyncHandler:          syncHandler,
+		WorkflowHandler:      workflowHandler,
+		AdminWorkflowHandler: adminWorkflowHandler,
+		StaticProxyHandler:   staticProxyHandler,
+		JWTSecret:            cfg.JWT.Secret,
+		DB:                   db, // 传递 DB 用于 API Key 验证
 	})
 
 	server := &http.Server{

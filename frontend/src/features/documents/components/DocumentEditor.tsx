@@ -58,8 +58,8 @@ import {
 } from "../../../api/documents";
 import type { MetadataValueType } from "../types";
 import { DocumentReferenceModal } from "./DocumentReferenceModal";
-import { AIProcessingButton } from "./AIProcessingButton";
 import { SyncButton } from "./SyncButton";
+import { DocumentWorkflowButton } from "./DocumentWorkflowButton";
 import {
   useFileUpload,
   formatUploadLink,
@@ -985,7 +985,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
             </Button>
           )}
           {isEditMode && effectiveDocId && (
-            <AIProcessingButton
+            <DocumentWorkflowButton
               documentId={effectiveDocId}
               documentTitle={title}
             />

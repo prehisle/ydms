@@ -6,15 +6,28 @@ export interface WorkflowDefinition {
   workflow_key: string;
   name: string;
   description: string;
+  prefect_deployment_name: string;
+  prefect_deployment_id?: string;
+  prefect_version?: string;
+  prefect_tags?: { tags?: string[] };
   parameter_schema: Record<string, unknown>;
+  source: "prefect" | "manual";
+  workflow_type: "node" | "document";
+  sync_status: "active" | "missing" | "error";
+  last_synced_at?: string;
+  last_seen_at?: string;
+  spec_hash?: string;
   enabled: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // 工作流运行记录
 export interface WorkflowRun {
   id: number;
   workflow_key: string;
-  node_id: number;
+  node_id?: number;
+  document_id?: number;
   parameters: Record<string, unknown>;
   status: "pending" | "running" | "success" | "failed" | "cancelled";
   prefect_flow_run_id?: string;
@@ -101,6 +114,7 @@ export async function getWorkflowRun(runId: number): Promise<WorkflowRun> {
 // 获取所有工作流运行记录（全局）
 export async function listWorkflowRuns(params?: {
   node_id?: number;
+  document_id?: number;
   workflow_key?: string;
   status?: string;
   limit?: number;
@@ -108,6 +122,7 @@ export async function listWorkflowRuns(params?: {
 }): Promise<WorkflowRunsResponse> {
   const searchParams = new URLSearchParams();
   if (params?.node_id) searchParams.set("node_id", String(params.node_id));
+  if (params?.document_id) searchParams.set("document_id", String(params.document_id));
   if (params?.workflow_key) searchParams.set("workflow_key", params.workflow_key);
   if (params?.status) searchParams.set("status", params.status);
   if (params?.limit) searchParams.set("limit", String(params.limit));
@@ -116,5 +131,112 @@ export async function listWorkflowRuns(params?: {
   const query = searchParams.toString();
   return http<WorkflowRunsResponse>(
     `/api/v1/workflows/runs${query ? `?${query}` : ""}`
+  );
+}
+
+// ===== Document Workflow API =====
+
+// 获取文档可用的工作流定义
+export async function listDocumentWorkflows(docId: number): Promise<WorkflowDefinition[]> {
+  return http<WorkflowDefinition[]>(`/api/v1/documents/${docId}/workflows`);
+}
+
+// 触发文档工作流
+export async function triggerDocumentWorkflow(
+  docId: number,
+  workflowKey: string,
+  request?: TriggerWorkflowRequest
+): Promise<TriggerWorkflowResponse> {
+  return http<TriggerWorkflowResponse>(
+    `/api/v1/documents/${docId}/workflows/${workflowKey}/runs`,
+    {
+      method: "POST",
+      body: JSON.stringify(request || {}),
+    }
+  );
+}
+
+// 获取文档的工作流运行历史
+export async function listDocumentWorkflowRuns(
+  docId: number,
+  params?: { limit?: number; offset?: number; status?: string }
+): Promise<WorkflowRunsResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  if (params?.status) searchParams.set("status", params.status);
+
+  const query = searchParams.toString();
+  return http<WorkflowRunsResponse>(
+    `/api/v1/documents/${docId}/workflow-runs${query ? `?${query}` : ""}`
+  );
+}
+
+// ===== Admin API =====
+
+// 同步状态
+export interface SyncStatus {
+  last_sync_time?: string;
+  status: "idle" | "in_progress" | "success" | "failed" | "completed_with_errors";
+  error?: string;
+  prefect_enabled: boolean;
+}
+
+// 同步结果
+export interface SyncResult {
+  created: number;
+  updated: number;
+  missing: number;
+  errors?: string[];
+  duration: string;
+}
+
+// 管理 API：获取同步状态
+export async function getSyncStatus(): Promise<SyncStatus> {
+  return http<SyncStatus>("/api/v1/admin/workflows/sync/status");
+}
+
+// 管理 API：触发同步
+export async function triggerSync(): Promise<SyncResult> {
+  return http<SyncResult>("/api/v1/admin/workflows/sync", {
+    method: "POST",
+  });
+}
+
+// 管理 API：列出所有工作流定义（带过滤）
+export interface AdminWorkflowFilter {
+  source?: "prefect" | "manual";
+  type?: "node" | "document";
+  sync_status?: "active" | "missing" | "error";
+  enabled?: boolean;
+}
+
+export async function listAdminWorkflows(
+  filter?: AdminWorkflowFilter
+): Promise<WorkflowDefinition[]> {
+  const searchParams = new URLSearchParams();
+  if (filter?.source) searchParams.set("source", filter.source);
+  if (filter?.type) searchParams.set("type", filter.type);
+  if (filter?.sync_status) searchParams.set("sync_status", filter.sync_status);
+  if (filter?.enabled !== undefined)
+    searchParams.set("enabled", String(filter.enabled));
+
+  const query = searchParams.toString();
+  return http<WorkflowDefinition[]>(
+    `/api/v1/admin/workflows${query ? `?${query}` : ""}`
+  );
+}
+
+// 管理 API：更新工作流定义
+export async function updateAdminWorkflow(
+  id: number,
+  data: { enabled: boolean }
+): Promise<{ success: boolean; message: string }> {
+  return http<{ success: boolean; message: string }>(
+    `/api/v1/admin/workflows/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }
   );
 }

@@ -65,51 +65,6 @@ func (APIKey) TableName() string {
 	return "api_keys"
 }
 
-// ProcessingJob AI 处理任务模型
-type ProcessingJob struct {
-	ID        uint      `gorm:"primarykey" json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-
-	// 文档信息
-	DocumentID      int64  `gorm:"not null;index" json:"document_id"`
-	DocumentVersion int    `gorm:"not null" json:"document_version"`
-	DocumentTitle   string `json:"document_title"`
-
-	// 流水线信息
-	PipelineName   string  `gorm:"not null" json:"pipeline_name"`
-	PipelineParams JSONMap `gorm:"type:jsonb;default:'{}'" json:"pipeline_params"` // JSONB 存储
-
-	// Prefect 集成
-	PrefectDeploymentID string `json:"prefect_deployment_id,omitempty"`
-	PrefectFlowRunID    string `gorm:"index" json:"prefect_flow_run_id,omitempty"`
-
-	// 状态: pending, running, completed, failed, cancelled
-	Status   string `gorm:"not null;default:'pending';index" json:"status"`
-	Progress int    `gorm:"default:0" json:"progress"` // 进度百分比 0-100
-
-	// 结果
-	Result       JSONMap `gorm:"type:jsonb" json:"result,omitempty"` // JSONB 存储处理结果
-	ErrorMessage string  `json:"error_message,omitempty"`            // 失败时的错误信息
-
-	// 幂等性: hash(doc_id + version + pipeline)
-	IdempotencyKey string `gorm:"uniqueIndex" json:"idempotency_key"`
-
-	// 触发者
-	TriggeredByID *uint `gorm:"index" json:"triggered_by_id,omitempty"`
-	TriggeredBy   *User `gorm:"foreignKey:TriggeredByID" json:"triggered_by,omitempty"`
-	DryRun        bool  `gorm:"default:false" json:"dry_run"` // 是否预览模式
-
-	// 时间戳
-	StartedAt   *time.Time `json:"started_at,omitempty"`   // 开始处理时间
-	CompletedAt *time.Time `json:"completed_at,omitempty"` // 完成时间
-}
-
-// TableName 指定表名
-func (ProcessingJob) TableName() string {
-	return "processing_jobs"
-}
-
 // DocSyncStatus 文档同步状态模型
 // 记录文档到外部 MySQL 数据库的同步状态
 type DocSyncStatus struct {
@@ -156,7 +111,7 @@ func (j *JSONMap) Scan(value interface{}) error {
 }
 
 // WorkflowDefinition 工作流定义模型
-// 定义可在节点上运行的工作流类型
+// 定义可在节点或文档上运行的工作流类型
 type WorkflowDefinition struct {
 	ID        uint      `gorm:"primarykey" json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -166,14 +121,27 @@ type WorkflowDefinition struct {
 	WorkflowKey string `gorm:"uniqueIndex;not null;size:64" json:"workflow_key"` // 如 generate_overview, generate_exercises
 
 	// 展示信息
-	Name        string `gorm:"not null;size:128" json:"name"`        // 显示名称
-	Description string `gorm:"type:text" json:"description"`         // 描述
+	Name        string `gorm:"not null;size:128" json:"name"` // 显示名称
+	Description string `gorm:"type:text" json:"description"`  // 描述
 
 	// Prefect 集成
 	PrefectDeploymentName string `gorm:"not null;size:128" json:"prefect_deployment_name"` // Prefect deployment 名称
+	PrefectDeploymentID   string `gorm:"size:64;index" json:"prefect_deployment_id"`       // Prefect deployment UUID
+	PrefectVersion        string `gorm:"size:32" json:"prefect_version"`                   // 如 "1.0.0"
+	PrefectTags           JSONMap `gorm:"type:jsonb" json:"prefect_tags"`                  // Prefect 部署标签
 
 	// 参数配置
 	ParameterSchema JSONMap `gorm:"type:jsonb;default:'{}'" json:"parameter_schema"` // JSON Schema，用于前端动态表单
+
+	// 来源与类型
+	Source       string `gorm:"not null;size:16;default:'manual';index" json:"source"`     // prefect | manual
+	WorkflowType string `gorm:"not null;size:16;default:'node';index" json:"workflow_type"` // node | document
+
+	// 同步状态
+	SyncStatus   string     `gorm:"not null;size:16;default:'active'" json:"sync_status"` // active | missing | error
+	LastSyncedAt *time.Time `json:"last_synced_at,omitempty"`                             // 最后同步时间
+	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`                               // 最后在 Prefect 中看到的时间
+	SpecHash     string     `gorm:"size:64" json:"spec_hash,omitempty"`                   // 用于变更检测
 
 	// 状态
 	Enabled bool `gorm:"default:true" json:"enabled"` // 是否启用
@@ -194,8 +162,9 @@ type WorkflowRun struct {
 	// 工作流信息
 	WorkflowKey string `gorm:"not null;size:64;index" json:"workflow_key"` // 关联的工作流定义
 
-	// 节点信息
-	NodeID int64 `gorm:"not null;index" json:"node_id"` // 运行的节点 ID
+	// 目标对象（节点或文档，二选一）
+	NodeID     *int64 `gorm:"index" json:"node_id,omitempty"`     // 节点 ID（节点工作流）
+	DocumentID *int64 `gorm:"index" json:"document_id,omitempty"` // 文档 ID（文档工作流）
 
 	// 运行参数
 	Parameters JSONMap `gorm:"type:jsonb;default:'{}'" json:"parameters"` // 运行时传入的参数
@@ -207,7 +176,7 @@ type WorkflowRun struct {
 	PrefectFlowRunID string `gorm:"size:64;index" json:"prefect_flow_run_id,omitempty"`
 
 	// 结果
-	Result       JSONMap `gorm:"type:jsonb" json:"result,omitempty"`     // 运行结果
+	Result       JSONMap `gorm:"type:jsonb" json:"result,omitempty"`        // 运行结果
 	ErrorMessage string  `gorm:"type:text" json:"error_message,omitempty"` // 错误信息
 
 	// 触发者

@@ -45,7 +45,6 @@ export function NavBar({ collapsed = false }: NavBarProps): JSX.Element {
   // 根据当前路径确定激活的导航项
   const activeKey = useMemo(() => {
     if (location.pathname.startsWith("/system")) return "system";
-    if (location.pathname.startsWith("/tasks")) return "tasks";
     return "documents";
   }, [location.pathname]);
 
@@ -56,7 +55,6 @@ export function NavBar({ collapsed = false }: NavBarProps): JSX.Element {
   const navItems = useMemo<MenuProps["items"]>(() => {
     const items: MenuProps["items"] = [
       { key: "documents", label: <Link to="/documents">节点与文档管理</Link> },
-      { key: "tasks", label: <Link to="/tasks">任务中心</Link> },
     ];
     if (canAccessSystem) {
       items.push({ key: "system", label: <Link to="/system">系统管理</Link> });

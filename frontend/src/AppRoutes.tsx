@@ -7,8 +7,7 @@ import { PrivateRoute } from "./components/PrivateRoute";
 import { RequireRole } from "./components/RequireRole";
 import { LoginPage } from "./features/auth";
 import { MainLayout } from "./components/Layout";
-import { TaskListPage, TaskDetailPage } from "./features/tasks";
-import { SystemDashboard, SystemUsersPage, SystemApiKeysPage } from "./features/system";
+import { SystemDashboard, SystemUsersPage, SystemApiKeysPage, SystemWorkflowsPage } from "./features/system";
 
 const DocumentEditor = lazy(() =>
   import("./features/documents/components/DocumentEditor").then((module) => ({
@@ -71,10 +70,6 @@ export const AppRoutes = () => {
               }
             />
 
-            {/* 任务中心 */}
-            <Route path="tasks" element={<TaskListPage />} />
-            <Route path="tasks/:id" element={<TaskDetailPage />} />
-
             {/* 系统管理 - 仅超级管理员可访问 */}
             <Route
               path="system"
@@ -97,6 +92,14 @@ export const AppRoutes = () => {
               element={
                 <RequireRole allowedRoles={["super_admin"]}>
                   <SystemApiKeysPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="system/workflows"
+              element={
+                <RequireRole allowedRoles={["super_admin", "course_admin"]}>
+                  <SystemWorkflowsPage />
                 </RequireRole>
               }
             />

@@ -16,18 +16,18 @@ import (
 
 // RouterConfig 路由器配置
 type RouterConfig struct {
-	Handler           *Handler
-	AuthHandler       *AuthHandler
-	UserHandler       *UserHandler
-	CourseHandler     *CourseHandler
-	APIKeyHandler     *APIKeyHandler
-	AssetsHandler     *AssetsHandler
-	ProcessingHandler *ProcessingHandler
-	SyncHandler       *SyncHandler
-	WorkflowHandler   *WorkflowHandler
-	StaticProxyHandler *StaticProxyHandler
-	JWTSecret         string
-	DB                *gorm.DB // 用于 API Key 验证
+	Handler              *Handler
+	AuthHandler          *AuthHandler
+	UserHandler          *UserHandler
+	CourseHandler        *CourseHandler
+	APIKeyHandler        *APIKeyHandler
+	AssetsHandler        *AssetsHandler
+	SyncHandler          *SyncHandler
+	WorkflowHandler      *WorkflowHandler
+	AdminWorkflowHandler *AdminWorkflowHandler
+	StaticProxyHandler   *StaticProxyHandler
+	JWTSecret            string
+	DB                   *gorm.DB // 用于 API Key 验证
 }
 
 // NewRouter creates the HTTP router and wires handler endpoints.
@@ -92,9 +92,9 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 	mux.Handle("/api/v1/categories/", authWrap(http.HandlerFunc(cfg.Handler.CategoryRoutes)))
 	mux.Handle("/api/v1/documents", authWrap(http.HandlerFunc(cfg.Handler.Documents)))
 	// 文档路由：如果有 SyncHandler，使用组合处理器
-	if cfg.SyncHandler != nil {
+	if cfg.SyncHandler != nil || cfg.WorkflowHandler != nil {
 		mux.Handle("/api/v1/documents/", authWrap(http.HandlerFunc(
-			combineDocumentAndSyncRoutes(cfg.Handler, cfg.SyncHandler),
+			combineDocumentRoutes(cfg.Handler, cfg.SyncHandler, cfg.WorkflowHandler),
 		)))
 	} else {
 		mux.Handle("/api/v1/documents/", authWrap(http.HandlerFunc(cfg.Handler.DocumentRoutes)))
@@ -117,17 +117,6 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 		mux.Handle("/api/v1/assets/", authWrap(http.HandlerFunc(cfg.AssetsHandler.AssetRoutes)))
 	}
 
-	// Processing 端点（AI 处理）
-	if cfg.ProcessingHandler != nil {
-		// 触发和查询端点（需要认证）
-		mux.Handle("/api/v1/processing", authWrap(http.HandlerFunc(cfg.ProcessingHandler.Processing)))
-		mux.Handle("/api/v1/processing/pipelines", authWrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
-		mux.Handle("/api/v1/processing/jobs", authWrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
-		mux.Handle("/api/v1/processing/jobs/", authWrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
-		// Callback 端点（不需要 JWT 认证，由 Webhook Secret 验证）
-		mux.Handle("/api/v1/processing/callback/", wrap(http.HandlerFunc(cfg.ProcessingHandler.ProcessingRoutes)))
-	}
-
 	// Sync 端点（MySQL 同步）
 	if cfg.SyncHandler != nil {
 		// 同步回调端点（不需要 JWT 认证，由 Webhook Secret 验证）
@@ -143,6 +132,14 @@ func NewRouterWithConfig(cfg RouterConfig) http.Handler {
 		// 工作流定义和运行记录（需要认证）
 		mux.Handle("/api/v1/workflows", authWrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))
 		mux.Handle("/api/v1/workflows/", authWrap(http.HandlerFunc(cfg.WorkflowHandler.WorkflowRoutes)))
+	}
+
+	// Admin Workflow 管理端点（需要认证）
+	if cfg.AdminWorkflowHandler != nil {
+		mux.Handle("/api/v1/admin/workflows/sync/status", authWrap(http.HandlerFunc(cfg.AdminWorkflowHandler.GetSyncStatus)))
+		mux.Handle("/api/v1/admin/workflows/sync", authWrap(http.HandlerFunc(cfg.AdminWorkflowHandler.TriggerSync)))
+		mux.Handle("/api/v1/admin/workflows", authWrap(http.HandlerFunc(cfg.AdminWorkflowHandler.ListWorkflowDefinitions)))
+		mux.Handle("/api/v1/admin/workflows/", authWrap(http.HandlerFunc(handleAdminWorkflowRoutes(cfg.AdminWorkflowHandler))))
 	}
 
 	// 静态资源代理（/ndr-assets/* -> MinIO）
@@ -310,33 +307,59 @@ func requestContextMiddleware(defaultUserID string) func(http.Handler) http.Hand
 	}
 }
 
-// combineDocumentAndSyncRoutes 组合文档路由和同步路由
-// 根据路径判断是否是同步相关请求，分发到对应的处理器
-func combineDocumentAndSyncRoutes(h *Handler, sh *SyncHandler) http.HandlerFunc {
+// combineDocumentRoutes 组合文档路由、同步路由和工作流路由
+// 根据路径判断是否是同步或工作流相关请求，分发到对应的处理器
+func combineDocumentRoutes(h *Handler, sh *SyncHandler, wh *WorkflowHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		relPath := strings.TrimPrefix(path, "/api/v1/documents/")
 
-		// 检查是否是同步相关路由
-		// /api/v1/documents/{id}/sync (POST)
-		// /api/v1/documents/{id}/sync-status (GET)
-		if strings.HasSuffix(path, "/sync") || strings.HasSuffix(path, "/sync-status") {
-			// 解析文档 ID
-			relPath := strings.TrimPrefix(path, "/api/v1/documents/")
-			parts := strings.Split(relPath, "/")
-			if len(parts) >= 2 {
-				docID, err := strconv.ParseInt(parts[0], 10, 64)
-				if err != nil {
-					respondError(w, http.StatusBadRequest, errors.New("invalid document id"))
-					return
-				}
+		// 解析文档 ID
+		parts := strings.Split(relPath, "/")
+		if len(parts) >= 2 {
+			docID, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, errors.New("invalid document id"))
+				return
+			}
+
+			// 检查是否是同步相关路由
+			// /api/v1/documents/{id}/sync (POST)
+			// /api/v1/documents/{id}/sync-status (GET)
+			if sh != nil && (parts[1] == "sync" || parts[1] == "sync-status") {
 				sh.DocumentSyncRoutes(w, r, docID)
 				return
+			}
+
+			// 检查是否是工作流相关路由
+			// /api/v1/documents/{id}/workflows
+			// /api/v1/documents/{id}/workflows/{workflowKey}/runs
+			// /api/v1/documents/{id}/workflow-runs
+			if wh != nil {
+				if parts[1] == "workflows" {
+					subPath := ""
+					if len(parts) > 2 {
+						subPath = strings.Join(parts[2:], "/")
+					}
+					wh.DocumentWorkflowRoutes(w, r, docID, subPath)
+					return
+				}
+
+				if parts[1] == "workflow-runs" {
+					wh.DocumentWorkflowRoutes(w, r, docID, "-runs")
+					return
+				}
 			}
 		}
 
 		// 其他路由交给原来的文档处理器
 		h.DocumentRoutes(w, r)
 	}
+}
+
+// combineDocumentAndSyncRoutes 保留为向后兼容（已废弃，使用 combineDocumentRoutes）
+func combineDocumentAndSyncRoutes(h *Handler, sh *SyncHandler) http.HandlerFunc {
+	return combineDocumentRoutes(h, sh, nil)
 }
 
 // combineNodeAndWorkflowRoutes 组合节点路由和工作流路由
@@ -379,5 +402,23 @@ func combineNodeAndWorkflowRoutes(h *Handler, wh *WorkflowHandler) http.HandlerF
 
 		// 其他路由交给原来的节点处理器
 		h.NodeRoutes(w, r)
+	}
+}
+
+// handleAdminWorkflowRoutes 处理管理员工作流相关子路由
+func handleAdminWorkflowRoutes(h *AdminWorkflowHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		relPath := strings.TrimPrefix(path, "/api/v1/admin/workflows/")
+
+		// PATCH /api/v1/admin/workflows/{id}
+		if r.Method == http.MethodPatch && relPath != "" && !strings.Contains(relPath, "/") {
+			// 设置 PathValue 以便 handler 可以获取 ID
+			r.SetPathValue("id", relPath)
+			h.UpdateWorkflowDefinition(w, r)
+			return
+		}
+
+		respondError(w, http.StatusNotFound, errors.New("not found"))
 	}
 }

@@ -75,6 +75,32 @@ func (s *WorkflowService) ListWorkflowDefinitions(ctx context.Context) ([]Workfl
 	return result, nil
 }
 
+// ListWorkflowDefinitionsByType returns enabled workflow definitions filtered by type.
+func (s *WorkflowService) ListWorkflowDefinitionsByType(ctx context.Context, workflowType string) ([]WorkflowDefinitionInfo, error) {
+	var definitions []database.WorkflowDefinition
+	// 兼容空的 sync_status（手动创建的工作流可能没有 sync_status）
+	query := s.db.Where("enabled = ? AND (sync_status = ? OR sync_status = '' OR sync_status IS NULL)", true, "active")
+	if workflowType != "" {
+		query = query.Where("workflow_type = ?", workflowType)
+	}
+	if err := query.Find(&definitions).Error; err != nil {
+		return nil, fmt.Errorf("failed to list workflow definitions: %w", err)
+	}
+
+	result := make([]WorkflowDefinitionInfo, len(definitions))
+	for i, def := range definitions {
+		result[i] = WorkflowDefinitionInfo{
+			ID:              def.ID,
+			WorkflowKey:     def.WorkflowKey,
+			Name:            def.Name,
+			Description:     def.Description,
+			ParameterSchema: def.ParameterSchema,
+			Enabled:         def.Enabled,
+		}
+	}
+	return result, nil
+}
+
 // GetWorkflowDefinition retrieves a single workflow definition by key.
 func (s *WorkflowService) GetWorkflowDefinition(ctx context.Context, workflowKey string) (*database.WorkflowDefinition, error) {
 	var def database.WorkflowDefinition
@@ -90,6 +116,13 @@ func (s *WorkflowService) GetWorkflowDefinition(ctx context.Context, workflowKey
 // TriggerWorkflowRequest represents a request to trigger a workflow on a node.
 type TriggerWorkflowRequest struct {
 	NodeID      int64                  `json:"node_id"`
+	WorkflowKey string                 `json:"workflow_key"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+}
+
+// TriggerDocumentWorkflowRequest represents a request to trigger a workflow on a document.
+type TriggerDocumentWorkflowRequest struct {
+	DocumentID  int64                  `json:"document_id"`
 	WorkflowKey string                 `json:"workflow_key"`
 	Parameters  map[string]interface{} `json:"parameters,omitempty"`
 }
@@ -114,6 +147,16 @@ func (s *WorkflowService) TriggerWorkflow(
 		return nil, err
 	}
 
+	// 检查 sync_status（非活跃的同步工作流不允许触发）
+	if def.SyncStatus != "" && def.SyncStatus != "active" {
+		return nil, fmt.Errorf("workflow %s is not active (status=%s)", req.WorkflowKey, def.SyncStatus)
+	}
+
+	// 检查 workflow_type（防止通过节点端点触发文档工作流）
+	if def.WorkflowType != "" && def.WorkflowType != "node" {
+		return nil, fmt.Errorf("workflow %s is not a node workflow", req.WorkflowKey)
+	}
+
 	// 2. Verify node exists and get source documents
 	sources, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), req.NodeID)
 	if err != nil {
@@ -122,7 +165,7 @@ func (s *WorkflowService) TriggerWorkflow(
 
 	// 3. Get target documents (node's direct documents) for generate_node_documents workflow
 	var targetDocs []map[string]interface{}
-	if req.WorkflowKey == "generate_node_documents" || req.WorkflowKey == "generate_node_documents_v2" || req.WorkflowKey == "generate_node_documents_v3" {
+	if req.WorkflowKey == "generate_node_documents" || req.WorkflowKey == "generate_node_documents_v2" || req.WorkflowKey == "generate_node_documents_v3" || req.WorkflowKey == "generate_node_documents_exercises" {
 		query := url.Values{}
 		query.Set("include_descendants", "false")
 		query.Set("size", "100")
@@ -161,9 +204,10 @@ func (s *WorkflowService) TriggerWorkflow(
 		params = database.JSONMap(req.Parameters)
 	}
 
+	nodeID := req.NodeID
 	run := database.WorkflowRun{
 		WorkflowKey: req.WorkflowKey,
-		NodeID:      req.NodeID,
+		NodeID:      &nodeID,
 		Parameters:  params,
 		Status:      WorkflowStatusPending,
 		CreatedByID: &meta.UserIDNumeric,
@@ -257,6 +301,125 @@ func (s *WorkflowService) TriggerWorkflow(
 	}, nil
 }
 
+// TriggerDocumentWorkflow triggers a workflow on a document.
+func (s *WorkflowService) TriggerDocumentWorkflow(
+	ctx context.Context,
+	meta RequestMeta,
+	req TriggerDocumentWorkflowRequest,
+) (*TriggerWorkflowResponse, error) {
+	// 1. Validate workflow exists and is a document workflow
+	def, err := s.GetWorkflowDefinition(ctx, req.WorkflowKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// 检查 sync_status（非活跃的同步工作流不允许触发）
+	if def.SyncStatus != "" && def.SyncStatus != "active" {
+		return nil, fmt.Errorf("workflow %s is not active (status=%s)", req.WorkflowKey, def.SyncStatus)
+	}
+
+	// Verify it's a document workflow
+	if def.WorkflowType != "document" {
+		return nil, fmt.Errorf("workflow %s is not a document workflow", req.WorkflowKey)
+	}
+
+	// 2. Get document info from NDR
+	doc, err := s.ndr.GetDocument(ctx, toNDRMeta(meta), req.DocumentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get document: %w", err)
+	}
+
+	// 3. Create workflow run record
+	params := database.JSONMap{}
+	if req.Parameters != nil {
+		params = database.JSONMap(req.Parameters)
+	}
+
+	documentID := req.DocumentID
+	run := database.WorkflowRun{
+		WorkflowKey: req.WorkflowKey,
+		DocumentID:  &documentID,
+		Parameters:  params,
+		Status:      WorkflowStatusPending,
+		CreatedByID: &meta.UserIDNumeric,
+	}
+
+	if err := s.db.Create(&run).Error; err != nil {
+		return nil, fmt.Errorf("failed to create workflow run: %w", err)
+	}
+
+	// 4. If Prefect is not enabled, return pending status
+	if !s.prefectEnabled {
+		return &TriggerWorkflowResponse{
+			RunID:   run.ID,
+			Status:  WorkflowStatusPending,
+			Message: "工作流已创建（Prefect 未配置）",
+		}, nil
+	}
+
+	// 5. Find Prefect deployment
+	deployment, err := s.prefect.GetDeploymentByName(ctx, req.WorkflowKey, def.PrefectDeploymentName)
+	if err != nil {
+		s.db.Model(&run).Updates(map[string]interface{}{
+			"status":        WorkflowStatusFailed,
+			"error_message": fmt.Sprintf("Deployment not found: %s", err.Error()),
+		})
+		return nil, fmt.Errorf("failed to find deployment: %w", err)
+	}
+
+	// 6. Build flow parameters
+	callbackURL := fmt.Sprintf("%s/api/v1/workflows/callback/%d", s.pdmsBaseURL, run.ID)
+
+	flowParams := map[string]interface{}{
+		"run_id":        run.ID,
+		"document_id":   req.DocumentID,
+		"document_type": doc.Type,
+		"workflow_key":  req.WorkflowKey,
+		"callback_url":  callbackURL,
+		"pdms_base_url": s.pdmsBaseURL,
+	}
+
+	// Add user parameters (with reserved key protection)
+	reservedKeys := map[string]bool{
+		"run_id":        true,
+		"document_id":   true,
+		"document_type": true,
+		"workflow_key":  true,
+		"callback_url":  true,
+		"pdms_base_url": true,
+	}
+	for k, v := range req.Parameters {
+		if !reservedKeys[k] {
+			flowParams[k] = v
+		}
+	}
+
+	// 7. Create flow run
+	flowRun, err := s.prefect.CreateFlowRun(ctx, deployment.ID, flowParams)
+	if err != nil {
+		s.db.Model(&run).Updates(map[string]interface{}{
+			"status":        WorkflowStatusFailed,
+			"error_message": fmt.Sprintf("Failed to create flow run: %s", err.Error()),
+		})
+		return nil, fmt.Errorf("failed to create flow run: %w", err)
+	}
+
+	// 8. Update run record
+	now := time.Now()
+	s.db.Model(&run).Updates(map[string]interface{}{
+		"prefect_flow_run_id": flowRun.ID,
+		"status":              WorkflowStatusRunning,
+		"started_at":          &now,
+	})
+
+	return &TriggerWorkflowResponse{
+		RunID:            run.ID,
+		Status:           WorkflowStatusRunning,
+		PrefectFlowRunID: flowRun.ID,
+		Message:          "工作流已提交",
+	}, nil
+}
+
 // GetWorkflowRun retrieves a workflow run by ID.
 func (s *WorkflowService) GetWorkflowRun(ctx context.Context, runID uint) (*database.WorkflowRun, error) {
 	var run database.WorkflowRun
@@ -272,6 +435,7 @@ func (s *WorkflowService) GetWorkflowRun(ctx context.Context, runID uint) (*data
 // ListWorkflowRunsParams parameters for listing workflow runs.
 type ListWorkflowRunsParams struct {
 	NodeID      *int64   // Filter by node ID
+	DocumentID  *int64   // Filter by document ID
 	WorkflowKey *string  // Filter by workflow key
 	Status      []string // Filter by status
 	Limit       int
@@ -291,6 +455,9 @@ func (s *WorkflowService) ListWorkflowRuns(ctx context.Context, params ListWorkf
 
 	if params.NodeID != nil {
 		query = query.Where("node_id = ?", *params.NodeID)
+	}
+	if params.DocumentID != nil {
+		query = query.Where("document_id = ?", *params.DocumentID)
 	}
 	if params.WorkflowKey != nil {
 		query = query.Where("workflow_key = ?", *params.WorkflowKey)
@@ -387,6 +554,14 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 			Name:                  "生成节点文档(V3)",
 			Description:           "V3版本：新增规划阶段、灰度SVG、禁止emoji、必背融合到正文",
 			PrefectDeploymentName: "node-generate-documents-v3-deployment",
+			ParameterSchema:       database.JSONMap{},
+			Enabled:               true,
+		},
+		{
+			WorkflowKey:           "generate_node_documents_exercises",
+			Name:                  "生成章节练习",
+			Description:           "章节练习：两阶段生成高质量选择题，题目具备深度和迷惑性",
+			PrefectDeploymentName: "node-generate-exercises-deployment",
 			ParameterSchema:       database.JSONMap{},
 			Enabled:               true,
 		},
