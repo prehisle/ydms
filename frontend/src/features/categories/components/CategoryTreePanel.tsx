@@ -118,6 +118,10 @@ export interface CategoryTreePanelProps {
   onDocumentDrop?: (targetNodeId: number, dragData: any) => void;
   onOpenBatchWorkflow?: (nodeId: number, nodeName: string) => void;
   onOpenBatchSync?: (nodeId: number, nodeName: string) => void;
+  /** 外部跳转时需要滚动到的节点 ID，设置后会自动展开路径并滚动 */
+  scrollToNodeId?: number | null;
+  /** 滚动完成后的回调，用于清除 scrollToNodeId */
+  onScrollToNodeComplete?: () => void;
 }
 
 export function CategoryTreePanel({
@@ -152,6 +156,8 @@ export function CategoryTreePanel({
   onDocumentDrop,
   onOpenBatchWorkflow,
   onOpenBatchSync,
+  scrollToNodeId,
+  onScrollToNodeComplete,
 }: CategoryTreePanelProps) {
   const [searchValue, setSearchValue] = useState("");
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
@@ -224,15 +230,16 @@ export function CategoryTreePanel({
     }
   }, [effectiveCategories, searchValue, defaultExpandedKeys]);
 
-  // 外部（例如 URL 参数跳转）选中节点时：自动展开到该节点的父级路径
+  // 外部跳转（如 URL 参数）时：自动展开到目标节点的父级路径并滚动
   useEffect(() => {
-    if (!selectedNodeId) return;
+    if (!scrollToNodeId) return;
     if (searchValue.trim()) return;
     if (lookups.byId.size === 0) return;
 
+    // 展开父级路径
     const nextExpanded = new Set<string>();
     const visited = new Set<number>();
-    let current = lookups.byId.get(selectedNodeId);
+    let current = lookups.byId.get(scrollToNodeId);
     while (current?.parent_id != null) {
       const parentId = current.parent_id;
       if (visited.has(parentId)) break;
@@ -249,18 +256,15 @@ export function CategoryTreePanel({
       });
       setAutoExpandParent(true);
     }
-  }, [selectedNodeId, searchValue, lookups.byId]);
 
-  // 滚动定位到选中节点
-  useEffect(() => {
-    if (!selectedNodeId) return;
-    if (searchValue.trim()) return;
-    const key = String(selectedNodeId);
-    const raf = window.requestAnimationFrame(() => {
+    // 延迟滚动，等待展开动画完成
+    const key = String(scrollToNodeId);
+    const timer = setTimeout(() => {
       treeRef.current?.scrollTo?.({ key, align: "auto" });
-    });
-    return () => window.cancelAnimationFrame(raf);
-  }, [selectedNodeId, expandedKeys, treeHeight, searchValue]);
+      onScrollToNodeComplete?.();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [scrollToNodeId, searchValue, lookups.byId, onScrollToNodeComplete]);
 
 
   useEffect(() => {

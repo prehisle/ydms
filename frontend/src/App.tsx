@@ -260,6 +260,7 @@ export const DocumentsPage = () => {
 
   // URL 参数处理：支持通过 ?nodeId=xxx 跳转并选中节点
   const [searchParams, setSearchParams] = useSearchParams();
+  const [scrollToNodeId, setScrollToNodeId] = useState<number | null>(null);
   const nodeIdParam = searchParams.get("nodeId");
   useEffect(() => {
     if (!nodeIdParam) return;
@@ -277,11 +278,18 @@ export const DocumentsPage = () => {
       lastSelectedId: nodeId,
     });
 
+    // 设置滚动目标节点
+    setScrollToNodeId(nodeId);
+
     // 仅删除 nodeId 参数
     const next = new URLSearchParams(searchParams);
     next.delete("nodeId");
     setSearchParams(next, { replace: true });
   }, [nodeIdParam, lookups.byId, handleSelectionChange, searchParams, setSearchParams]);
+
+  const handleScrollToNodeComplete = useCallback(() => {
+    setScrollToNodeId(null);
+  }, []);
 
   // 刷新分类和文档查询
   const invalidateAllQueries = useCallback(async () => {
@@ -813,6 +821,8 @@ export const DocumentsPage = () => {
     onDocumentDrop: handleDropOnNode,
     onOpenBatchWorkflow: handleOpenBatchWorkflow,
     onOpenBatchSync: handleOpenBatchSync,
+    scrollToNodeId,
+    onScrollToNodeComplete: handleScrollToNodeComplete,
   };
 
   const breadcrumbProps: CategoryBreadcrumbProps = {
