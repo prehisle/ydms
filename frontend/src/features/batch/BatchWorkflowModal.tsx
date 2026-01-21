@@ -247,7 +247,7 @@ export function BatchWorkflowModal({
         skip_no_source: skipNoSource,
         skip_no_output: skipNoOutput,
         skip_name_contains: skipNameContains && skipNamePattern ? skipNamePattern : undefined,
-        concurrency: 3,
+        concurrency: 5,
       });
       setBatchId(result.batch_id);
       setCurrentStep(2);
