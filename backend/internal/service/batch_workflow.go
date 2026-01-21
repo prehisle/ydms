@@ -17,7 +17,8 @@ import (
 
 const (
 	// DefaultBatchConcurrency 默认批量执行并发数
-	DefaultBatchConcurrency = 3
+	// 设为 1 避免 Prefect Server (SQLite) 并发写入导致 503
+	DefaultBatchConcurrency = 1
 	// MaxBatchConcurrency 最大批量执行并发数
 	MaxBatchConcurrency = 10
 )
