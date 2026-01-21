@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -112,7 +113,7 @@ func (c *Client) GetDeploymentByName(ctx context.Context, flowName, deploymentNa
 	return &deployments[0], nil
 }
 
-// CreateFlowRun creates a new flow run for a deployment.
+// CreateFlowRun creates a new flow run for a deployment with retry.
 func (c *Client) CreateFlowRun(ctx context.Context, deploymentID string, params map[string]interface{}) (*FlowRunResponse, error) {
 	url := fmt.Sprintf("%s/api/deployments/%s/create_flow_run", c.baseURL, deploymentID)
 
@@ -126,29 +127,52 @@ func (c *Client) CreateFlowRun(ctx context.Context, deploymentID string, params 
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+	// 重试配置
+	maxRetries := 3
+	baseDelay := 2 * time.Second
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create flow run: %w", err)
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := baseDelay * time.Duration(1<<(attempt-1)) // 指数退避: 2s, 4s, 8s
+			log.Printf("[prefect] retry %d for create_flow_run after %v", attempt, delay)
+			time.Sleep(delay)
+		}
 
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create flow run: %w", err)
+			continue // 网络错误，重试
+		}
+
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
+			var flowRun FlowRunResponse
+			if err := json.Unmarshal(bodyBytes, &flowRun); err != nil {
+				return nil, fmt.Errorf("failed to decode response: %w", err)
+			}
+			return &flowRun, nil
+		}
+
+		// 503 或其他可重试错误
+		if resp.StatusCode == 503 || resp.StatusCode == 502 || resp.StatusCode == 504 {
+			lastErr = fmt.Errorf("create flow run failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
+			continue // 重试
+		}
+
+		// 其他错误不重试
 		return nil, fmt.Errorf("create flow run failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var flowRun FlowRunResponse
-	if err := json.NewDecoder(resp.Body).Decode(&flowRun); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &flowRun, nil
+	return nil, fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
 }
 
 // GetFlowRun gets the status of a flow run.
