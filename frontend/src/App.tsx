@@ -22,7 +22,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   CopyOutlined,
@@ -257,6 +257,31 @@ export const DocumentsPage = () => {
     handleOpenAPIKeyManagement,
     handleCloseAPIKeyManagement,
   } = useUIContext();
+
+  // URL 参数处理：支持通过 ?nodeId=xxx 跳转并选中节点
+  const [searchParams, setSearchParams] = useSearchParams();
+  const nodeIdParam = searchParams.get("nodeId");
+  useEffect(() => {
+    if (!nodeIdParam) return;
+
+    const nodeId = parseInt(nodeIdParam, 10);
+    if (Number.isNaN(nodeId)) return;
+
+    // 等待分类树加载完成后再选中
+    if (!lookups.byId.has(nodeId)) return;
+
+    const node = lookups.byId.get(nodeId);
+    handleSelectionChange({
+      selectedIds: [nodeId],
+      selectionParentId: node?.parent_id ?? null,
+      lastSelectedId: nodeId,
+    });
+
+    // 仅删除 nodeId 参数
+    const next = new URLSearchParams(searchParams);
+    next.delete("nodeId");
+    setSearchParams(next, { replace: true });
+  }, [nodeIdParam, lookups.byId, handleSelectionChange, searchParams, setSearchParams]);
 
   // 刷新分类和文档查询
   const invalidateAllQueries = useCallback(async () => {

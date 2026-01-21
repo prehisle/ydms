@@ -45,22 +45,30 @@ export function NavBar({ collapsed = false }: NavBarProps): JSX.Element {
   // 根据当前路径确定激活的导航项
   const activeKey = useMemo(() => {
     if (location.pathname.startsWith("/system")) return "system";
+    if (location.pathname.startsWith("/workflow-runs")) return "workflow-runs";
     return "documents";
   }, [location.pathname]);
 
   // 系统管理仅对超级管理员可见
   const canAccessSystem = user?.role === "super_admin";
 
+  // 执行历史对管理员可见
+  const canAccessWorkflowRuns =
+    user?.role === "super_admin" || user?.role === "course_admin";
+
   // 构建导航菜单项
   const navItems = useMemo<MenuProps["items"]>(() => {
     const items: MenuProps["items"] = [
       { key: "documents", label: <Link to="/documents">节点与文档管理</Link> },
     ];
+    if (canAccessWorkflowRuns) {
+      items.push({ key: "workflow-runs", label: <Link to="/workflow-runs">执行历史</Link> });
+    }
     if (canAccessSystem) {
       items.push({ key: "system", label: <Link to="/system">系统管理</Link> });
     }
     return items;
-  }, [canAccessSystem]);
+  }, [canAccessSystem, canAccessWorkflowRuns]);
 
   // 退出登录处理
   const handleLogout = async (): Promise<void> => {

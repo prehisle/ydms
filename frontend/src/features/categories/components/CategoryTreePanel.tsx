@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   Key,
@@ -10,6 +10,7 @@ import type {
 import { Alert, Empty, Menu, Modal, Spin, Tag, Tree, Typography } from "antd";
 import type { MenuProps, TreeProps } from "antd";
 import type { MessageInstance } from "antd/es/message/interface";
+import type { TreeRef } from "antd/es/tree";
 import {
   ClearOutlined,
   CopyOutlined,
@@ -155,6 +156,7 @@ export function CategoryTreePanel({
   const [searchValue, setSearchValue] = useState("");
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [autoExpandParent, setAutoExpandParent] = useState(true);
+  const treeRef = useRef<TreeRef>(null);
   const [dropTargetNodeId, setDropTargetNodeId] = useState<number | null>(null);
   const [treeContainerEl, setTreeContainerEl] = useState<HTMLDivElement | null>(null);
   const [treeHeight, setTreeHeight] = useState(0);
@@ -221,6 +223,44 @@ export function CategoryTreePanel({
       );
     }
   }, [effectiveCategories, searchValue, defaultExpandedKeys]);
+
+  // 外部（例如 URL 参数跳转）选中节点时：自动展开到该节点的父级路径
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    if (searchValue.trim()) return;
+    if (lookups.byId.size === 0) return;
+
+    const nextExpanded = new Set<string>();
+    const visited = new Set<number>();
+    let current = lookups.byId.get(selectedNodeId);
+    while (current?.parent_id != null) {
+      const parentId = current.parent_id;
+      if (visited.has(parentId)) break;
+      visited.add(parentId);
+      nextExpanded.add(String(parentId));
+      current = lookups.byId.get(parentId);
+    }
+
+    if (nextExpanded.size > 0) {
+      setExpandedKeys((prev) => {
+        const merged = new Set<string>(prev);
+        nextExpanded.forEach((k) => merged.add(k));
+        return Array.from(merged);
+      });
+      setAutoExpandParent(true);
+    }
+  }, [selectedNodeId, searchValue, lookups.byId]);
+
+  // 滚动定位到选中节点
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    if (searchValue.trim()) return;
+    const key = String(selectedNodeId);
+    const raf = window.requestAnimationFrame(() => {
+      treeRef.current?.scrollTo?.({ key, align: "auto" });
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [selectedNodeId, expandedKeys, treeHeight, searchValue]);
 
 
   useEffect(() => {
@@ -1118,6 +1158,7 @@ export function CategoryTreePanel({
         onContextMenuCapture={suppressNativeContextMenu}
       >
         <Tree<TreeDataNode>
+          ref={treeRef}
           blockNode
           draggable={{ icon: false }}
           showLine={{ showLeafIcon: false }}

@@ -7,7 +7,7 @@ import { PrivateRoute } from "./components/PrivateRoute";
 import { RequireRole } from "./components/RequireRole";
 import { LoginPage } from "./features/auth";
 import { MainLayout } from "./components/Layout";
-import { SystemDashboard, SystemUsersPage, SystemApiKeysPage, SystemWorkflowsPage } from "./features/system";
+import { SystemDashboard, SystemUsersPage, SystemApiKeysPage, SystemWorkflowsPage, SystemWorkflowRunsPage } from "./features/system";
 
 const DocumentEditor = lazy(() =>
   import("./features/documents/components/DocumentEditor").then((module) => ({
@@ -100,6 +100,16 @@ export const AppRoutes = () => {
               element={
                 <RequireRole allowedRoles={["super_admin", "course_admin"]}>
                   <SystemWorkflowsPage />
+                </RequireRole>
+              }
+            />
+
+            {/* 执行历史 - 顶层路由，管理员可访问 */}
+            <Route
+              path="workflow-runs"
+              element={
+                <RequireRole allowedRoles={["super_admin", "course_admin"]}>
+                  <SystemWorkflowRunsPage />
                 </RequireRole>
               }
             />
