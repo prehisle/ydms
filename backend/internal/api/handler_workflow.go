@@ -54,9 +54,26 @@ func (h *WorkflowHandler) WorkflowRoutes(w http.ResponseWriter, r *http.Request)
 	}
 
 	// GET /api/v1/workflows/runs/{runId} - get workflow run
+	// POST /api/v1/workflows/runs/{runId}/cancel - cancel workflow run
 	if strings.HasPrefix(relPath, "runs/") {
-		runIDStr := strings.TrimPrefix(relPath, "runs/")
-		runID, err := strconv.ParseUint(runIDStr, 10, 64)
+		rest := strings.TrimPrefix(relPath, "runs/")
+		// Check for /cancel suffix
+		if strings.HasSuffix(rest, "/cancel") {
+			runIDStr := strings.TrimSuffix(rest, "/cancel")
+			runID, err := strconv.ParseUint(runIDStr, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, errors.New("invalid run id"))
+				return
+			}
+			if r.Method == http.MethodPost {
+				h.cancelWorkflowRun(w, r, uint(runID))
+				return
+			}
+			respondError(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
+			return
+		}
+		// Otherwise it's GET /runs/{runId}
+		runID, err := strconv.ParseUint(rest, 10, 64)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, errors.New("invalid run id"))
 			return
@@ -120,6 +137,7 @@ func (h *WorkflowHandler) listNodeWorkflows(w http.ResponseWriter, r *http.Reque
 func (h *WorkflowHandler) triggerWorkflow(w http.ResponseWriter, r *http.Request, meta service.RequestMeta, nodeID int64, workflowKey string) {
 	var params struct {
 		Parameters map[string]interface{} `json:"parameters"`
+		RetryOfID  *uint                  `json:"retry_of_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil && err.Error() != "EOF" {
 		respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "请求格式错误", err.Error()))
@@ -130,10 +148,16 @@ func (h *WorkflowHandler) triggerWorkflow(w http.ResponseWriter, r *http.Request
 		NodeID:      nodeID,
 		WorkflowKey: workflowKey,
 		Parameters:  params.Parameters,
+		RetryOfID:   params.RetryOfID,
 	}
 
 	resp, err := h.workflowService.TriggerWorkflow(r.Context(), meta, req)
 	if err != nil {
+		var vErr *service.ValidationError
+		if errors.As(err, &vErr) {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "请求参数错误", vErr.Error()))
+			return
+		}
 		respondAPIError(w, WrapUpstreamError(err))
 		return
 	}
@@ -222,6 +246,29 @@ func (h *WorkflowHandler) getWorkflowRun(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, run)
 }
 
+// cancelWorkflowRun handles POST /api/v1/workflows/runs/{runId}/cancel
+func (h *WorkflowHandler) cancelWorkflowRun(w http.ResponseWriter, r *http.Request, runID uint) {
+	err := h.workflowService.CancelWorkflowRun(r.Context(), runID)
+	if err != nil {
+		if errors.Is(err, service.ErrWorkflowRunNotFound) {
+			respondError(w, http.StatusNotFound, err)
+			return
+		}
+		var vErr *service.ValidationError
+		if errors.As(err, &vErr) {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "取消失败", vErr.Error()))
+			return
+		}
+		respondError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "工作流已取消",
+	})
+}
+
 // handleCallback handles POST /api/v1/workflows/callback/{runId}
 func (h *WorkflowHandler) handleCallback(w http.ResponseWriter, r *http.Request, runID uint) {
 	if r.Method != http.MethodPost {
@@ -285,6 +332,7 @@ func (h *WorkflowHandler) listDocumentWorkflows(w http.ResponseWriter, r *http.R
 func (h *WorkflowHandler) triggerDocumentWorkflow(w http.ResponseWriter, r *http.Request, meta service.RequestMeta, docID int64, workflowKey string) {
 	var params struct {
 		Parameters map[string]interface{} `json:"parameters"`
+		RetryOfID  *uint                  `json:"retry_of_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil && err.Error() != "EOF" {
 		respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "请求格式错误", err.Error()))
@@ -295,10 +343,16 @@ func (h *WorkflowHandler) triggerDocumentWorkflow(w http.ResponseWriter, r *http
 		DocumentID:  docID,
 		WorkflowKey: workflowKey,
 		Parameters:  params.Parameters,
+		RetryOfID:   params.RetryOfID,
 	}
 
 	resp, err := h.workflowService.TriggerDocumentWorkflow(r.Context(), meta, req)
 	if err != nil {
+		var vErr *service.ValidationError
+		if errors.As(err, &vErr) {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "请求参数错误", vErr.Error()))
+			return
+		}
 		respondAPIError(w, WrapUpstreamError(err))
 		return
 	}

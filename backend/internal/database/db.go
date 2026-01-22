@@ -125,6 +125,23 @@ func AutoMigrateWithDefaults(db *gorm.DB, defaults AdminDefaults) error {
 		log.Printf("Warning: failed to create workflow_runs.created_by FK: %v", err)
 	}
 
+	// WorkflowRun.RetryOf -> WorkflowRun.ID (自引用)
+	err = db.Exec(`
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM information_schema.table_constraints
+				WHERE constraint_name = 'fk_workflow_runs_retry_of' AND table_name = 'workflow_runs'
+			) THEN
+				ALTER TABLE workflow_runs ADD CONSTRAINT fk_workflow_runs_retry_of
+				FOREIGN KEY (retry_of_id) REFERENCES workflow_runs(id) ON DELETE SET NULL;
+			END IF;
+		END$$;
+	`).Error
+	if err != nil {
+		log.Printf("Warning: failed to create workflow_runs.retry_of FK: %v", err)
+	}
+
 	// WorkflowBatch.CreatedBy -> User.ID
 	err = db.Exec(`
 		DO $$

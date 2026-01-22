@@ -24,6 +24,20 @@ const (
 	WorkflowStatusCancelled = "cancelled"
 )
 
+// ErrWorkflowRunNotFound is returned when a workflow run is not found.
+var ErrWorkflowRunNotFound = errors.New("workflow run not found")
+
+// ValidationError is used for request validation failures that should map to HTTP 400.
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string { return e.Message }
+
+func newValidationError(format string, args ...interface{}) error {
+	return &ValidationError{Message: fmt.Sprintf(format, args...)}
+}
+
 // WorkflowService handles node workflow operations.
 type WorkflowService struct {
 	db             *gorm.DB
@@ -118,7 +132,8 @@ type TriggerWorkflowRequest struct {
 	NodeID       int64                  `json:"node_id"`
 	WorkflowKey  string                 `json:"workflow_key"`
 	Parameters   map[string]interface{} `json:"parameters,omitempty"`
-	SourceDocIDs []int64                `json:"-"` // 预获取的源文档 ID（内部使用，跳过重复查询）
+	SourceDocIDs []int64                `json:"-"`                      // 预获取的源文档 ID（内部使用，跳过重复查询）
+	RetryOfID    *uint                  `json:"retry_of_id,omitempty"`  // 重试来源任务 ID
 }
 
 // TriggerDocumentWorkflowRequest represents a request to trigger a workflow on a document.
@@ -126,6 +141,7 @@ type TriggerDocumentWorkflowRequest struct {
 	DocumentID  int64                  `json:"document_id"`
 	WorkflowKey string                 `json:"workflow_key"`
 	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+	RetryOfID   *uint                  `json:"retry_of_id,omitempty"` // 重试来源任务 ID
 }
 
 // TriggerWorkflowResponse represents the response after triggering a workflow.
@@ -134,6 +150,40 @@ type TriggerWorkflowResponse struct {
 	Status           string `json:"status"`
 	PrefectFlowRunID string `json:"prefect_flow_run_id,omitempty"`
 	Message          string `json:"message,omitempty"`
+}
+
+// validateRetryOf validates the retry_of_id parameter.
+func (s *WorkflowService) validateRetryOf(
+	ctx context.Context,
+	retryOfID *uint,
+	workflowKey string,
+	nodeID *int64,
+	documentID *int64,
+) error {
+	if retryOfID == nil {
+		return nil
+	}
+	if *retryOfID == 0 {
+		return newValidationError("retry_of_id must be a positive integer")
+	}
+
+	var src database.WorkflowRun
+	if err := s.db.First(&src, *retryOfID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return newValidationError("retry_of_id refers to a non-existent workflow run (%d)", *retryOfID)
+		}
+		return err
+	}
+	if src.WorkflowKey != workflowKey {
+		return newValidationError("retry_of_id (%d) workflow_key mismatch", *retryOfID)
+	}
+	if nodeID != nil && (src.NodeID == nil || *src.NodeID != *nodeID) {
+		return newValidationError("retry_of_id (%d) node_id mismatch", *retryOfID)
+	}
+	if documentID != nil && (src.DocumentID == nil || *src.DocumentID != *documentID) {
+		return newValidationError("retry_of_id (%d) document_id mismatch", *retryOfID)
+	}
+	return nil
 }
 
 // TriggerWorkflow triggers a workflow on a node.
@@ -156,6 +206,11 @@ func (s *WorkflowService) TriggerWorkflow(
 	// 检查 workflow_type（防止通过节点端点触发文档工作流）
 	if def.WorkflowType != "" && def.WorkflowType != "node" {
 		return nil, fmt.Errorf("workflow %s is not a node workflow", req.WorkflowKey)
+	}
+
+	// 校验 retry_of_id 参数
+	if err := s.validateRetryOf(ctx, req.RetryOfID, req.WorkflowKey, &req.NodeID, nil); err != nil {
+		return nil, err
 	}
 
 	// 2. Verify node exists and get source documents
@@ -224,6 +279,7 @@ func (s *WorkflowService) TriggerWorkflow(
 		Parameters:  params,
 		Status:      WorkflowStatusPending,
 		CreatedByID: &meta.UserIDNumeric,
+		RetryOfID:   req.RetryOfID,
 	}
 
 	if err := s.db.Create(&run).Error; err != nil {
@@ -330,6 +386,11 @@ func (s *WorkflowService) TriggerDocumentWorkflow(
 		return nil, fmt.Errorf("workflow %s is not a document workflow", req.WorkflowKey)
 	}
 
+	// 校验 retry_of_id 参数
+	if err := s.validateRetryOf(ctx, req.RetryOfID, req.WorkflowKey, nil, &req.DocumentID); err != nil {
+		return nil, err
+	}
+
 	// 2. Get document info from NDR
 	doc, err := s.ndr.GetDocument(ctx, toNDRMeta(meta), req.DocumentID)
 	if err != nil {
@@ -349,6 +410,7 @@ func (s *WorkflowService) TriggerDocumentWorkflow(
 		Parameters:  params,
 		Status:      WorkflowStatusPending,
 		CreatedByID: &meta.UserIDNumeric,
+		RetryOfID:   req.RetryOfID,
 	}
 
 	if err := s.db.Create(&run).Error; err != nil {
@@ -432,11 +494,42 @@ func (s *WorkflowService) GetWorkflowRun(ctx context.Context, runID uint) (*data
 	var run database.WorkflowRun
 	if err := s.db.Preload("CreatedBy").First(&run, runID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("workflow run not found")
+			return nil, ErrWorkflowRunNotFound
 		}
 		return nil, err
 	}
 	return &run, nil
+}
+
+// CancelWorkflowRun cancels a workflow run (marks it as cancelled).
+// This only updates the local database status; it does not cancel the Prefect flow run.
+func (s *WorkflowService) CancelWorkflowRun(ctx context.Context, runID uint) error {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status":      WorkflowStatusCancelled,
+		"finished_at": now,
+	}
+
+	// 原子条件更新：只允许 pending/running -> cancelled，避免并发下"取消已完成任务"
+	res := s.db.Model(&database.WorkflowRun{}).
+		Where("id = ? AND status IN ?", runID, []string{WorkflowStatusPending, WorkflowStatusRunning}).
+		Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		return nil
+	}
+
+	// 区分：不存在 vs 状态不允许取消
+	var run database.WorkflowRun
+	if err := s.db.Select("id, status").First(&run, runID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrWorkflowRunNotFound
+		}
+		return err
+	}
+	return newValidationError("只能取消待执行或运行中的任务（当前状态: %s）", run.Status)
 }
 
 // ListWorkflowRunsParams parameters for listing workflow runs.
@@ -449,11 +542,18 @@ type ListWorkflowRunsParams struct {
 	Offset      int
 }
 
+// WorkflowRunInfo extends WorkflowRun with retry count for API responses.
+type WorkflowRunInfo struct {
+	database.WorkflowRun
+	RetryCount        int     `json:"retry_count"`                    // 被重试的次数
+	LatestRetryStatus *string `json:"latest_retry_status,omitempty"`  // 最新重试的状态（用于闭环）
+}
+
 // ListWorkflowRunsResponse response for listing workflow runs.
 type ListWorkflowRunsResponse struct {
-	Runs    []database.WorkflowRun `json:"runs"`
-	Total   int64                  `json:"total"`
-	HasMore bool                   `json:"has_more"`
+	Runs    []WorkflowRunInfo `json:"runs"`
+	Total   int64             `json:"total"`
+	HasMore bool              `json:"has_more"`
 }
 
 // ListWorkflowRuns lists workflow runs with optional filters.
@@ -496,8 +596,74 @@ func (s *WorkflowService) ListWorkflowRuns(ctx context.Context, params ListWorkf
 		return nil, err
 	}
 
+	// 收集所有 run ID，批量查询重试次数
+	runIDs := make([]uint, len(runs))
+	for i, run := range runs {
+		runIDs[i] = run.ID
+	}
+
+	// 查询每个任务被重试的次数
+	var retryCounts []struct {
+		RetryOfID  uint `gorm:"column:retry_of_id"`
+		RetryCount int  `gorm:"column:retry_count"`
+	}
+	if len(runIDs) > 0 {
+		if err := s.db.Model(&database.WorkflowRun{}).
+			Select("retry_of_id, COUNT(*) as retry_count").
+			Where("retry_of_id IN ?", runIDs).
+			Group("retry_of_id").
+			Scan(&retryCounts).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	// 构建 retry_of_id -> retry_count 映射
+	retryCountMap := make(map[uint]int)
+	for _, rc := range retryCounts {
+		retryCountMap[rc.RetryOfID] = rc.RetryCount
+	}
+
+	// 查询每个任务最新重试的状态（用于闭环显示）
+	var latestRetries []struct {
+		RetryOfID uint   `gorm:"column:retry_of_id"`
+		Status    string `gorm:"column:status"`
+	}
+	if len(runIDs) > 0 {
+		// 使用子查询找到每个原任务的最新重试记录的状态
+		// 按 created_at DESC, id DESC 排序取第一条（id DESC 确保同时间戳时结果稳定）
+		subQuery := s.db.Model(&database.WorkflowRun{}).
+			Select("retry_of_id, status, ROW_NUMBER() OVER (PARTITION BY retry_of_id ORDER BY created_at DESC, id DESC) as rn").
+			Where("retry_of_id IN ?", runIDs)
+
+		if err := s.db.Table("(?) as sub", subQuery).
+			Select("retry_of_id, status").
+			Where("rn = 1").
+			Scan(&latestRetries).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	// 构建 retry_of_id -> latest_status 映射
+	latestRetryStatusMap := make(map[uint]string)
+	for _, lr := range latestRetries {
+		latestRetryStatusMap[lr.RetryOfID] = lr.Status
+	}
+
+	// 组装结果
+	result := make([]WorkflowRunInfo, len(runs))
+	for i, run := range runs {
+		info := WorkflowRunInfo{
+			WorkflowRun: run,
+			RetryCount:  retryCountMap[run.ID],
+		}
+		if status, ok := latestRetryStatusMap[run.ID]; ok {
+			info.LatestRetryStatus = &status
+		}
+		result[i] = info
+	}
+
 	return &ListWorkflowRunsResponse{
-		Runs:    runs,
+		Runs:    result,
 		Total:   total,
 		HasMore: int64(offset+len(runs)) < total,
 	}, nil
@@ -515,6 +681,11 @@ func (s *WorkflowService) HandleCallback(ctx context.Context, runID uint, callba
 	var run database.WorkflowRun
 	if err := s.db.First(&run, runID).Error; err != nil {
 		return err
+	}
+
+	// 已取消的任务保持 cancelled，避免回调覆盖导致"取消不生效/状态跳变"
+	if run.Status == WorkflowStatusCancelled {
+		return nil
 	}
 
 	updates := map[string]interface{}{

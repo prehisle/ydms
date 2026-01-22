@@ -186,6 +186,10 @@ type WorkflowRun struct {
 	// 时间戳
 	StartedAt  *time.Time `json:"started_at,omitempty"`  // 开始时间
 	FinishedAt *time.Time `json:"finished_at,omitempty"` // 完成时间
+
+	// 重试关联
+	RetryOfID *uint        `gorm:"index" json:"retry_of_id,omitempty"` // 指向原任务 ID
+	RetryOf   *WorkflowRun `gorm:"foreignKey:RetryOfID" json:"-"`      // 关联对象（不序列化）
 }
 
 // TableName 指定表名

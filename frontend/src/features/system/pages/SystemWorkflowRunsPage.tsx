@@ -12,6 +12,7 @@ import {
   Button,
   message,
   Tooltip,
+  Popconfirm,
 } from "antd";
 import {
   HomeOutlined,
@@ -32,6 +33,7 @@ import {
   listAdminWorkflows,
   triggerNodeWorkflow,
   triggerDocumentWorkflow,
+  cancelWorkflowRun,
   type WorkflowRun,
 } from "../../../api/workflows";
 import { getCategoryTree, type Category } from "../../../api/categories";
@@ -101,6 +103,7 @@ export const SystemWorkflowRunsPage: FC = () => {
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<FilterState>({});
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
+  const [cancellingRunId, setCancellingRunId] = useState<number | null>(null);
 
   const isAdmin =
     currentUser?.role === "super_admin" ||
@@ -156,10 +159,12 @@ export const SystemWorkflowRunsPage: FC = () => {
       if (run.node_id) {
         return triggerNodeWorkflow(run.node_id, run.workflow_key, {
           parameters: run.parameters,
+          retry_of_id: run.id,
         });
       } else if (run.document_id) {
         return triggerDocumentWorkflow(run.document_id, run.workflow_key, {
           parameters: run.parameters,
+          retry_of_id: run.id,
         });
       }
       throw new Error("无法重试：缺少节点或文档信息");
@@ -172,6 +177,27 @@ export const SystemWorkflowRunsPage: FC = () => {
       message.error(`重试失败：${error.message}`);
     },
   });
+
+  // 取消工作流
+  const cancelMutation = useMutation({
+    mutationFn: (runId: number) => cancelWorkflowRun(runId),
+    onSuccess: () => {
+      message.success("工作流已取消");
+      queryClient.invalidateQueries({ queryKey: ["workflowRuns"] });
+    },
+    onError: (error: Error) => {
+      message.error(`取消失败：${error.message}`);
+    },
+    onSettled: () => {
+      setCancellingRunId(null);
+    },
+  });
+
+  // 处理取消操作
+  const handleCancel = (runId: number) => {
+    setCancellingRunId(runId);
+    cancelMutation.mutate(runId);
+  };
 
   // 格式化时间
   const formatTime = (timeStr?: string) => {
@@ -257,13 +283,33 @@ export const SystemWorkflowRunsPage: FC = () => {
       title: "状态",
       dataIndex: "status",
       key: "status",
-      width: 100,
-      render: (status: string) => {
+      width: 180,
+      render: (status: string, run: WorkflowRun) => {
         const config = statusConfig[status] || statusConfig.pending;
         return (
-          <Tag color={config.color} icon={config.icon}>
-            {config.label}
-          </Tag>
+          <Space size={4} wrap>
+            <Tag color={config.color} icon={config.icon}>
+              {config.label}
+            </Tag>
+            {run.retry_of_id && (
+              <Tooltip title={`此任务是对任务 #${run.retry_of_id} 的重试`}>
+                <Tag color="blue">重试自 #{run.retry_of_id}</Tag>
+              </Tooltip>
+            )}
+            {(run.retry_count ?? 0) > 0 && (
+              <Tooltip title={`此任务已被重试 ${run.retry_count} 次，最新状态：${
+                run.latest_retry_status ? statusConfig[run.latest_retry_status]?.label : "未知"
+              }`}>
+                <Tag color={
+                  run.latest_retry_status === "success" ? "success" :
+                  run.latest_retry_status === "failed" ? "error" :
+                  run.latest_retry_status === "running" ? "processing" : "orange"
+                }>
+                  已重试 → {run.latest_retry_status ? statusConfig[run.latest_retry_status]?.label : `${run.retry_count}次`}
+                </Tag>
+              </Tooltip>
+            )}
+          </Space>
         );
       },
     },
@@ -293,24 +339,51 @@ export const SystemWorkflowRunsPage: FC = () => {
     {
       title: "操作",
       key: "actions",
-      width: 80,
+      width: 120,
       fixed: "right" as const,
       render: (_, run) => {
         const canRetry =
           run.status === "failed" || run.status === "cancelled";
-        if (!canRetry) return null;
+        const canCancel =
+          run.status === "pending" || run.status === "running";
+        const isCancelling = cancellingRunId === run.id;
+
         return (
-          <Tooltip title="重试">
-            <Button
-              type="link"
-              size="small"
-              icon={<ReloadOutlined />}
-              loading={retryMutation.isPending}
-              onClick={() => retryMutation.mutate(run)}
-            >
-              重试
-            </Button>
-          </Tooltip>
+          <Space size={0}>
+            {canCancel && (
+              <Popconfirm
+                title="确认取消"
+                description="确定要取消此工作流吗？"
+                onConfirm={() => handleCancel(run.id)}
+                okText="确定"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+              >
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<StopOutlined />}
+                  loading={isCancelling}
+                >
+                  取消
+                </Button>
+              </Popconfirm>
+            )}
+            {canRetry && (
+              <Tooltip title="重试">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={retryMutation.isPending}
+                  onClick={() => retryMutation.mutate(run)}
+                >
+                  重试
+                </Button>
+              </Tooltip>
+            )}
+          </Space>
         );
       },
     },

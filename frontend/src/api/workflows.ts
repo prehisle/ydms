@@ -43,11 +43,16 @@ export interface WorkflowRun {
   updated_at: string;
   started_at?: string;
   finished_at?: string;
+  // 重试关联
+  retry_of_id?: number;  // 重试来源任务 ID
+  retry_count?: number;  // 被重试的次数
+  latest_retry_status?: "pending" | "running" | "success" | "failed" | "cancelled";  // 最新重试状态
 }
 
 // 触发工作流请求
 export interface TriggerWorkflowRequest {
   parameters?: Record<string, unknown>;
+  retry_of_id?: number;  // 重试来源任务 ID
 }
 
 // 触发工作流响应
@@ -109,6 +114,13 @@ export async function listNodeWorkflowRuns(
 // 获取工作流运行详情
 export async function getWorkflowRun(runId: number): Promise<WorkflowRun> {
   return http<WorkflowRun>(`/api/v1/workflows/runs/${runId}`);
+}
+
+// 取消工作流运行
+export async function cancelWorkflowRun(runId: number): Promise<{ success: boolean; message: string }> {
+  return http<{ success: boolean; message: string }>(`/api/v1/workflows/runs/${runId}/cancel`, {
+    method: "POST",
+  });
 }
 
 // 获取所有工作流运行记录（全局）
