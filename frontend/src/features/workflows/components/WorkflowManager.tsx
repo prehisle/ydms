@@ -265,19 +265,21 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
                       <Text strong style={{ fontSize: 12 }}>
                         待生成文档：{targetDocs.length} 个
                       </Text>
-                      <List
-                        size="small"
-                        dataSource={targetDocs}
-                        renderItem={(doc) => (
-                          <List.Item style={{ padding: "4px 0" }}>
-                            <Space size="small">
-                              <FileTextOutlined style={{ color: "#1890ff" }} />
-                              <Text style={{ fontSize: 12 }}>{doc.title}</Text>
-                              <Tag style={{ fontSize: 11 }}>{doc.type}</Tag>
-                            </Space>
-                          </List.Item>
-                        )}
-                      />
+                      <div style={{ maxHeight: 200, overflow: "auto" }}>
+                        <List
+                          size="small"
+                          dataSource={targetDocs}
+                          renderItem={(doc) => (
+                            <List.Item style={{ padding: "4px 0" }}>
+                              <Space size="small">
+                                <FileTextOutlined style={{ color: "#1890ff" }} />
+                                <Text style={{ fontSize: 12 }}>{doc.title}</Text>
+                                <Tag style={{ fontSize: 11 }}>{doc.type}</Tag>
+                              </Space>
+                            </List.Item>
+                          )}
+                        />
+                      </div>
                     </>
                   ) : (
                     <Empty
@@ -329,6 +331,7 @@ export function WorkflowManager({ nodeId, canEdit = false }: WorkflowManagerProp
         onCancel={() => setHistoryModalOpen(false)}
         footer={null}
         width={600}
+        styles={{ body: { maxHeight: "60vh", overflow: "auto" } }}
       >
         <List
           size="small"

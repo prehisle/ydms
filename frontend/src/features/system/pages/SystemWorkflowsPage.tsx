@@ -236,7 +236,7 @@ export const SystemWorkflowsPage: FC = () => {
   }
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: 24, height: "100%", overflow: "auto" }}>
       {contextHolder}
       <Breadcrumb
         style={{ marginBottom: 16 }}
