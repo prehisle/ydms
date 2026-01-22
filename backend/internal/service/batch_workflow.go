@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,7 +46,9 @@ func NewBatchWorkflowService(db *gorm.DB, ndr ndrclient.Client, workflowSvc *Wor
 type BatchWorkflowPreviewRequest struct {
 	WorkflowKey        string `json:"workflow_key"`
 	IncludeDescendants bool   `json:"include_descendants"`
-	SkipNoSource       bool   `json:"skip_no_source"` // 跳过没有源文档的节点
+	SkipNoSource       bool   `json:"skip_no_source"`       // 跳过没有源文档的节点
+	SkipNoOutput       bool   `json:"skip_no_output"`       // 跳过无产出文档的节点
+	SkipNameContains   string `json:"skip_name_contains"`   // 跳过节点名包含指定字符串的节点
 }
 
 // NodePreviewItem 节点预览项
@@ -73,6 +78,8 @@ type BatchWorkflowExecuteRequest struct {
 	WorkflowKey        string                 `json:"workflow_key"`
 	IncludeDescendants bool                   `json:"include_descendants"`
 	SkipNoSource       bool                   `json:"skip_no_source"`
+	SkipNoOutput       bool                   `json:"skip_no_output"`       // 跳过无产出文档的节点
+	SkipNameContains   string                 `json:"skip_name_contains"`   // 跳过节点名包含指定字符串的节点
 	Parameters         map[string]interface{} `json:"parameters,omitempty"`
 	Concurrency        int                    `json:"concurrency,omitempty"` // 并发数，默认 3
 }
@@ -135,29 +142,61 @@ func (s *BatchWorkflowService) PreviewBatchWorkflow(
 			Depth:    node.Depth,
 		}
 
+		// 检查节点名是否包含指定字符串
+		if req.SkipNameContains != "" && strings.Contains(node.Name, req.SkipNameContains) {
+			item.CanExecute = false
+			item.SkipReason = fmt.Sprintf("节点名包含「%s」", req.SkipNameContains)
+			willSkipCount++
+			previewItems = append(previewItems, item)
+			continue
+		}
+
 		// 检查源文档
 		sources, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), node.ID)
 		if err != nil {
 			item.CanExecute = false
 			item.SkipReason = fmt.Sprintf("获取源文档失败: %v", err)
 			willSkipCount++
-		} else {
-			item.SourceDocCount = len(sources)
-			if len(sources) == 0 {
-				if req.SkipNoSource {
-					item.CanExecute = false
-					item.SkipReason = "无源文档"
-					willSkipCount++
-				} else {
-					item.CanExecute = true
-					canExecuteCount++
-				}
-			} else {
-				item.CanExecute = true
-				canExecuteCount++
+			previewItems = append(previewItems, item)
+			continue
+		}
+		item.SourceDocCount = len(sources)
+
+		if len(sources) == 0 && req.SkipNoSource {
+			item.CanExecute = false
+			item.SkipReason = "无源文档"
+			willSkipCount++
+			previewItems = append(previewItems, item)
+			continue
+		}
+
+		// 检查产出文档（如果启用了跳过无产出）
+		if req.SkipNoOutput {
+			// 构建源文档 ID 列表，用于排除
+			sourceDocIDs := make([]int64, len(sources))
+			for i, src := range sources {
+				sourceDocIDs[i] = src.DocumentID
+			}
+			// 检查是否有非源文档的直接文档
+			hasOutput, err := s.nodeHasOutputDocuments(ctx, meta, node.ID, sourceDocIDs)
+			if err != nil {
+				item.CanExecute = false
+				item.SkipReason = fmt.Sprintf("获取产出文档失败: %v", err)
+				willSkipCount++
+				previewItems = append(previewItems, item)
+				continue
+			}
+			if !hasOutput {
+				item.CanExecute = false
+				item.SkipReason = "无产出文档"
+				willSkipCount++
+				previewItems = append(previewItems, item)
+				continue
 			}
 		}
 
+		item.CanExecute = true
+		canExecuteCount++
 		previewItems = append(previewItems, item)
 	}
 
@@ -216,6 +255,47 @@ func (s *BatchWorkflowService) collectNodes(
 	}
 
 	return result, nil
+}
+
+// nodeHasOutputDocuments 检查节点是否有产出文档（非源文档的直接文档）
+// 使用 include_descendants=false 只检查节点的直接文档，排除源文档
+func (s *BatchWorkflowService) nodeHasOutputDocuments(
+	ctx context.Context,
+	meta RequestMeta,
+	nodeID int64,
+	sourceDocIDs []int64,
+) (bool, error) {
+	sourceSet := make(map[int64]struct{}, len(sourceDocIDs))
+	for _, id := range sourceDocIDs {
+		sourceSet[id] = struct{}{}
+	}
+
+	const pageSize = 100
+	page := 1
+	for {
+		query := url.Values{}
+		query.Set("include_descendants", "false")
+		query.Set("page", strconv.Itoa(page))
+		query.Set("size", strconv.Itoa(pageSize))
+
+		docsPage, err := s.ndr.ListNodeDocuments(ctx, toNDRMeta(meta), nodeID, query)
+		if err != nil {
+			return false, err
+		}
+		for _, doc := range docsPage.Items {
+			if _, ok := sourceSet[doc.ID]; !ok {
+				return true, nil // 找到非源文档
+			}
+		}
+
+		fetched := docsPage.Page * docsPage.Size
+		if len(docsPage.Items) == 0 || fetched >= docsPage.Total {
+			break
+		}
+		page++
+	}
+
+	return false, nil
 }
 
 // ExecuteBatchWorkflow 执行批量工作流
@@ -316,9 +396,21 @@ func (s *BatchWorkflowService) executeBatchAsync(
 				"node_path": n.Path,
 			}
 
-			// 检查是否需要跳过
+			// 检查节点名是否包含指定字符串
+			if req.SkipNameContains != "" && strings.Contains(n.Name, req.SkipNameContains) {
+				mu.Lock()
+				skippedCount++
+				result["status"] = "skipped"
+				result["reason"] = fmt.Sprintf("节点名包含「%s」", req.SkipNameContains)
+				nodeResults = append(nodeResults, result)
+				mu.Unlock()
+				return
+			}
+
+			// 检查是否需要跳过无源文档的节点
+			// SkipNoOutput 也需要源文档集合用于"产出文档"判断，因此这里统一预取源文档
 			var sourceDocIDs []int64
-			if req.SkipNoSource {
+			if req.SkipNoSource || req.SkipNoOutput {
 				sources, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), n.ID)
 				if err != nil {
 					mu.Lock()
@@ -329,7 +421,7 @@ func (s *BatchWorkflowService) executeBatchAsync(
 					mu.Unlock()
 					return
 				}
-				if len(sources) == 0 {
+				if req.SkipNoSource && len(sources) == 0 {
 					mu.Lock()
 					skippedCount++
 					result["status"] = "skipped"
@@ -342,6 +434,29 @@ func (s *BatchWorkflowService) executeBatchAsync(
 				sourceDocIDs = make([]int64, len(sources))
 				for i, src := range sources {
 					sourceDocIDs[i] = src.DocumentID
+				}
+			}
+
+			// 检查是否需要跳过无产出文档的节点
+			if req.SkipNoOutput {
+				hasOutput, err := s.nodeHasOutputDocuments(ctx, meta, n.ID, sourceDocIDs)
+				if err != nil {
+					mu.Lock()
+					failedCount++
+					result["status"] = "failed"
+					result["error"] = fmt.Sprintf("获取产出文档失败: %v", err)
+					nodeResults = append(nodeResults, result)
+					mu.Unlock()
+					return
+				}
+				if !hasOutput {
+					mu.Lock()
+					skippedCount++
+					result["status"] = "skipped"
+					result["reason"] = "无产出文档"
+					nodeResults = append(nodeResults, result)
+					mu.Unlock()
+					return
 				}
 			}
 

@@ -512,9 +512,9 @@ export const DocumentsPage = () => {
   // 批量操作弹窗状态
   const [batchWorkflowModal, setBatchWorkflowModal] = useState<{
     open: boolean;
-    nodeId: number;
-    nodeName: string;
-  }>({ open: false, nodeId: 0, nodeName: "" });
+    nodeIds: number[];
+    nodeNames: string[];
+  }>({ open: false, nodeIds: [], nodeNames: [] });
 
   const [batchSyncModal, setBatchSyncModal] = useState<{
     open: boolean;
@@ -522,8 +522,8 @@ export const DocumentsPage = () => {
     nodeName: string;
   }>({ open: false, nodeId: 0, nodeName: "" });
 
-  const handleOpenBatchWorkflow = useCallback((nodeId: number, nodeName: string) => {
-    setBatchWorkflowModal({ open: true, nodeId, nodeName });
+  const handleOpenBatchWorkflow = useCallback((nodeIds: number[], nodeNames: string[]) => {
+    setBatchWorkflowModal({ open: true, nodeIds, nodeNames });
   }, []);
 
   const handleCloseBatchWorkflow = useCallback(() => {
@@ -1047,8 +1047,8 @@ export const DocumentsPage = () => {
       <APIKeyManagementDrawer open={apiKeyManagementOpen} onClose={handleCloseAPIKeyManagement} />
       <BatchWorkflowModal
         open={batchWorkflowModal.open}
-        nodeId={batchWorkflowModal.nodeId}
-        nodeName={batchWorkflowModal.nodeName}
+        nodeIds={batchWorkflowModal.nodeIds}
+        nodeNames={batchWorkflowModal.nodeNames}
         onClose={handleCloseBatchWorkflow}
         onSuccess={invalidateAllQueries}
       />

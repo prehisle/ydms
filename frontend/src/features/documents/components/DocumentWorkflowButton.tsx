@@ -91,14 +91,14 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
     refetchInterval: (query) => {
       const run = query.state.data;
       if (!run) return 2000;
-      if (run.status === "success" || run.status === "failed") {
+      if (run.status === "success" || run.status === "failed" || run.status === "cancelled") {
         return false; // 停止轮询
       }
       return 2000; // 每2秒轮询一次
     },
   });
 
-  // 当任务完成或失败时显示消息
+  // 当任务完成/失败/取消时显示消息
   useEffect(() => {
     if (!currentRun) return;
     if (currentRun.status === "success") {
@@ -112,6 +112,9 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
       });
     } else if (currentRun.status === "failed") {
       message.error(`工作流执行失败: ${currentRun.error_message || "未知错误"}`);
+    } else if (currentRun.status === "cancelled") {
+      message.info("工作流已取消");
+      setProgressModalOpen(false);
     }
   }, [currentRun?.status, currentRun?.error_message, documentId, queryClient]);
 
@@ -237,6 +240,8 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
         return <CheckCircleOutlined style={{ color: "#52c41a" }} />;
       case "failed":
         return <CloseCircleOutlined style={{ color: "#ff4d4f" }} />;
+      case "cancelled":
+        return <CloseCircleOutlined style={{ color: "#faad14" }} />;
       case "running":
         return <LoadingOutlined style={{ color: "#1890ff" }} />;
       case "pending":
@@ -365,54 +370,72 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
         footer={<Button onClick={() => refetchRuns()}>刷新</Button>}
         width={700}
       >
-        {runsData?.runs && runsData.runs.length > 0 ? (
-          <Space direction="vertical" style={{ width: "100%" }} size="small">
-            {runsData.runs.map((run: WorkflowRun) => (
-              <div
-                key={run.id}
-                style={{
-                  padding: 12,
-                  border: "1px solid #f0f0f0",
-                  borderRadius: 6,
-                }}
-              >
-                <Space
-                  style={{ width: "100%", justifyContent: "space-between" }}
+        <div style={{ maxHeight: "60vh", overflowY: "auto", paddingRight: 8 }}>
+          {runsData?.runs && runsData.runs.length > 0 ? (
+            <Space direction="vertical" style={{ width: "100%" }} size="small">
+              {runsData.runs.map((run: WorkflowRun) => (
+                <div
+                  key={run.id}
+                  style={{
+                    padding: 12,
+                    border: "1px solid #f0f0f0",
+                    borderRadius: 6,
+                  }}
                 >
-                  <Space>
-                    {getStatusIcon(run.status)}
-                    <Text strong>{run.workflow_key}</Text>
-                    <Tag color={statusColors[run.status]}>
-                      {statusLabels[run.status]}
-                    </Tag>
+                  <Space
+                    style={{ width: "100%", justifyContent: "space-between" }}
+                  >
+                    <Space>
+                      {getStatusIcon(run.status)}
+                      <Text strong>{run.workflow_key}</Text>
+                      <Tag color={statusColors[run.status]}>
+                        {statusLabels[run.status]}
+                      </Tag>
+                    </Space>
+                    <Space>
+                      {(run.status === "failed" || run.status === "cancelled") && (
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={<PlayCircleOutlined />}
+                          onClick={() => {
+                            setHistoryModalOpen(false);
+                            triggerMutation.mutate(run.workflow_key);
+                          }}
+                          loading={triggerMutation.isPending}
+                        >
+                          重试
+                        </Button>
+                      )}
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {formatTime(run.created_at)}
+                      </Text>
+                    </Space>
                   </Space>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {formatTime(run.created_at)}
-                  </Text>
-                </Space>
-                {run.error_message && (
-                  <Paragraph
-                    type="danger"
-                    style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}
-                    ellipsis={{ rows: 2 }}
-                  >
-                    {run.error_message}
-                  </Paragraph>
-                )}
-                {run.created_by && (
-                  <Text
-                    type="secondary"
-                    style={{ fontSize: 12, display: "block", marginTop: 4 }}
-                  >
-                    执行者：{run.created_by.display_name || run.created_by.username}
-                  </Text>
-                )}
-              </div>
-            ))}
-          </Space>
-        ) : (
-          <Empty description="暂无执行历史" />
-        )}
+                  {run.error_message && (
+                    <Paragraph
+                      type="danger"
+                      style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}
+                      ellipsis={{ rows: 2 }}
+                    >
+                      {run.error_message}
+                    </Paragraph>
+                  )}
+                  {run.created_by && (
+                    <Text
+                      type="secondary"
+                      style={{ fontSize: 12, display: "block", marginTop: 4 }}
+                    >
+                      执行者：{run.created_by.display_name || run.created_by.username}
+                    </Text>
+                  )}
+                </div>
+              ))}
+            </Space>
+          ) : (
+            <Empty description="暂无执行历史" />
+          )}
+        </div>
       </Modal>
     </>
   );

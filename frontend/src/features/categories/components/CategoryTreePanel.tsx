@@ -8,9 +8,10 @@ import type {
 } from "react";
 
 import { Alert, Empty, Menu, Modal, Spin, Tag, Tree, Typography } from "antd";
-import type { MenuProps, TreeProps } from "antd";
+import type { MenuProps, TreeProps, GetRef } from "antd";
 import type { MessageInstance } from "antd/es/message/interface";
-import type { TreeRef } from "antd/es/tree";
+
+type TreeRef = GetRef<typeof Tree>;
 import {
   ClearOutlined,
   CopyOutlined,
@@ -116,7 +117,7 @@ export interface CategoryTreePanelProps {
   onInvalidateQueries: () => Promise<void>;
   setIsMutating: (value: boolean) => void;
   onDocumentDrop?: (targetNodeId: number, dragData: any) => void;
-  onOpenBatchWorkflow?: (nodeId: number, nodeName: string) => void;
+  onOpenBatchWorkflow?: (nodeIds: number[], nodeNames: string[]) => void;
   onOpenBatchSync?: (nodeId: number, nodeName: string) => void;
   /** 外部跳转时需要滚动到的节点 ID，设置后会自动展开路径并滚动 */
   scrollToNodeId?: number | null;
@@ -758,7 +759,33 @@ export function CategoryTreePanel({
           disabled: isMutating,
           onClick: () => {
             closeContextMenu("action:batch-workflow");
-            onOpenBatchWorkflow(nodeId, targetNode.name);
+            // 收集所有选中的节点（如果当前节点在选中列表中则使用选中列表，否则只使用当前节点）
+            const targetIds = selectionIncludesNode ? resolvedSelectionIds : [nodeId];
+            const targetNames = targetIds.map(id => lookups.byId.get(id)?.name || `节点 ${id}`);
+
+            // 检测父子节点重合
+            const hasOverlap = (): boolean => {
+              const idSet = new Set(targetIds);
+              for (const id of targetIds) {
+                const visited = new Set<number>();
+                let current = lookups.byId.get(id);
+                while (current?.parent_id != null) {
+                  const parentId = current.parent_id;
+                  if (idSet.has(parentId)) return true;
+                  if (visited.has(parentId)) break; // cycle 防护
+                  visited.add(parentId);
+                  current = lookups.byId.get(parentId);
+                }
+              }
+              return false;
+            };
+
+            if (hasOverlap()) {
+              messageApi.warning("选中的节点存在包含关系（父子重合），请调整选择后重试");
+              return;
+            }
+
+            onOpenBatchWorkflow(targetIds, targetNames);
           },
         });
       }

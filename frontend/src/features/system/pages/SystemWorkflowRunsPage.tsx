@@ -9,6 +9,9 @@ import {
   Select,
   Descriptions,
   Alert,
+  Button,
+  message,
+  Tooltip,
 } from "antd";
 import {
   HomeOutlined,
@@ -19,13 +22,16 @@ import {
   StopOutlined,
   FileOutlined,
   FolderOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import type { ColumnsType } from "antd/es/table";
 import {
   listWorkflowRuns,
   listAdminWorkflows,
+  triggerNodeWorkflow,
+  triggerDocumentWorkflow,
   type WorkflowRun,
 } from "../../../api/workflows";
 import { getCategoryTree, type Category } from "../../../api/categories";
@@ -92,6 +98,7 @@ function buildNodeMap(
  */
 export const SystemWorkflowRunsPage: FC = () => {
   const { user: currentUser } = useAuth();
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<FilterState>({});
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
 
@@ -141,6 +148,29 @@ export const SystemWorkflowRunsPage: FC = () => {
       }),
     enabled: isAdmin,
     placeholderData: (previousData) => previousData,
+  });
+
+  // 重试工作流
+  const retryMutation = useMutation({
+    mutationFn: async (run: WorkflowRun) => {
+      if (run.node_id) {
+        return triggerNodeWorkflow(run.node_id, run.workflow_key, {
+          parameters: run.parameters,
+        });
+      } else if (run.document_id) {
+        return triggerDocumentWorkflow(run.document_id, run.workflow_key, {
+          parameters: run.parameters,
+        });
+      }
+      throw new Error("无法重试：缺少节点或文档信息");
+    },
+    onSuccess: () => {
+      message.success("工作流已重新提交");
+      queryClient.invalidateQueries({ queryKey: ["workflowRuns"] });
+    },
+    onError: (error: Error) => {
+      message.error(`重试失败：${error.message}`);
+    },
   });
 
   // 格式化时间
@@ -259,6 +289,30 @@ export const SystemWorkflowRunsPage: FC = () => {
       key: "duration",
       width: 100,
       render: (_, run) => calculateDuration(run),
+    },
+    {
+      title: "操作",
+      key: "actions",
+      width: 80,
+      fixed: "right" as const,
+      render: (_, run) => {
+        const canRetry =
+          run.status === "failed" || run.status === "cancelled";
+        if (!canRetry) return null;
+        return (
+          <Tooltip title="重试">
+            <Button
+              type="link"
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={retryMutation.isPending}
+              onClick={() => retryMutation.mutate(run)}
+            >
+              重试
+            </Button>
+          </Tooltip>
+        );
+      },
     },
   ];
 
@@ -406,6 +460,7 @@ export const SystemWorkflowRunsPage: FC = () => {
               setPagination({ current: page, pageSize });
             },
           }}
+          scroll={{ y: "calc(100vh - 340px)", x: "max-content" }}
           size="middle"
         />
       </Card>
