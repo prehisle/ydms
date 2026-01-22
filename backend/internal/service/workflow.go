@@ -762,6 +762,14 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 			Enabled:               true,
 		},
 		{
+			WorkflowKey:           "generate_node_documents_v7",
+			Name:                  "生成节点文档(V7)",
+			Description:           "V7版本：三步分离架构、LLM内容规划、并行处理、HTML+SVG注入",
+			PrefectDeploymentName: "node-generate-documents-v7-deployment",
+			ParameterSchema:       database.JSONMap{},
+			Enabled:               true,
+		},
+		{
 			WorkflowKey:           "generate_node_documents_exercises",
 			Name:                  "生成章节练习",
 			Description:           "章节练习：两阶段生成高质量选择题，题目具备深度和迷惑性",
