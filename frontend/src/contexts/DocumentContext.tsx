@@ -385,12 +385,20 @@ const [documentTrashParams, setDocumentTrashParams] = useState<DocumentTrashPara
     : documentsQuery.data ?? { page: 1, size: 10, total: 0, items: [] };
 
   // 过滤掉源文档，只保留产出文档
+  const sourceDocIds = useMemo(() => {
+    return new Set((sourceDocsQuery.data ?? []).map(s => s.document_id));
+  }, [sourceDocsQuery.data]);
+
   const documents = useMemo(() => {
-    const sourceDocIds = new Set(
-      (sourceDocsQuery.data ?? []).map(s => s.document_id)
-    );
     return documentsPage.items.filter(doc => !sourceDocIds.has(doc.id));
-  }, [documentsPage.items, sourceDocsQuery.data]);
+  }, [documentsPage.items, sourceDocIds]);
+
+  // 计算过滤后的 total（排除源文档数量）
+  const filteredTotal = useMemo(() => {
+    const sourceCount = sourceDocIds.size;
+    return Math.max(0, documentsPage.total - sourceCount);
+  }, [documentsPage.total, sourceDocIds]);
+
   const deletingDocId = deleteDocumentMutation.isPending
     ? deleteDocumentMutation.variables ?? null
     : null;
@@ -411,7 +419,7 @@ const [documentTrashParams, setDocumentTrashParams] = useState<DocumentTrashPara
     documentsError: documentsQuery.error,
     documentListPage: documentsPage.page,
     documentListSize: documentsPage.size,
-    documentListTotal: documentsPage.total,
+    documentListTotal: filteredTotal,
     documentFilters,
     includeDescendants,
     documentFilterForm,
