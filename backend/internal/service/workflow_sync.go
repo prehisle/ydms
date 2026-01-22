@@ -158,12 +158,13 @@ func (s *WorkflowSyncService) SyncFromPrefect(ctx context.Context) (*SyncResult,
 				// Check if conflict on workflow_key
 				if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "UNIQUE constraint") {
 					// Try to update by workflow_key instead
-					if updateErr := s.db.Where("workflow_key = ?", workflowKey).Updates(map[string]interface{}{
+					// Note: Use jsonMapToBytes() because GORM's Updates() with map doesn't call Value() method
+					if updateErr := s.db.Model(&database.WorkflowDefinition{}).Where("workflow_key = ?", workflowKey).Updates(map[string]interface{}{
 						"prefect_deployment_id":   dep.ID,
 						"prefect_deployment_name": dep.Name,
 						"prefect_version":         dep.Version,
-						"prefect_tags":            s.tagsToJSONMap(dep.Tags),
-						"parameter_schema":        database.JSONMap(dep.ParameterSchema),
+						"prefect_tags":            jsonMapToBytes(s.tagsToJSONMap(dep.Tags)),
+						"parameter_schema":        jsonMapToBytes(database.JSONMap(dep.ParameterSchema)),
 						"description":             dep.Description,
 						"source":                  "prefect",
 						"workflow_type":           workflowType,
@@ -195,12 +196,13 @@ func (s *WorkflowSyncService) SyncFromPrefect(ctx context.Context) (*SyncResult,
 
 			if existing.SpecHash != specHash {
 				// Spec changed, update all fields
+				// Note: Use jsonMapToBytes() because GORM's Updates() with map doesn't call Value() method
 				updates["name"] = dep.Name
 				updates["description"] = dep.Description
 				updates["prefect_deployment_name"] = dep.Name
 				updates["prefect_version"] = dep.Version
-				updates["prefect_tags"] = s.tagsToJSONMap(dep.Tags)
-				updates["parameter_schema"] = database.JSONMap(dep.ParameterSchema)
+				updates["prefect_tags"] = jsonMapToBytes(s.tagsToJSONMap(dep.Tags))
+				updates["parameter_schema"] = jsonMapToBytes(database.JSONMap(dep.ParameterSchema))
 				updates["workflow_type"] = workflowType
 				updates["spec_hash"] = specHash
 				updates["last_synced_at"] = now
@@ -306,6 +308,16 @@ func (s *WorkflowSyncService) tagsToJSONMap(tags []string) database.JSONMap {
 	return database.JSONMap{
 		"tags": tags,
 	}
+}
+
+// jsonMapToBytes converts JSONMap to []byte for GORM Updates() with map[string]interface{}.
+// GORM's Updates() with map doesn't call Value() method, so we need to serialize manually.
+func jsonMapToBytes(m database.JSONMap) []byte {
+	if m == nil {
+		return nil
+	}
+	b, _ := json.Marshal(m)
+	return b
 }
 
 // WorkflowDefinitionFilter represents filter options for listing workflow definitions.

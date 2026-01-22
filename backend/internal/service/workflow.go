@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -233,7 +234,8 @@ func (s *WorkflowService) TriggerWorkflow(
 
 	// 3. Get target documents (node's direct documents) for generate_node_documents workflow
 	var targetDocs []map[string]interface{}
-	if req.WorkflowKey == "generate_node_documents" || req.WorkflowKey == "generate_node_documents_v2" || req.WorkflowKey == "generate_node_documents_v3" || req.WorkflowKey == "generate_node_documents_v4" || req.WorkflowKey == "generate_node_documents_exercises" {
+	needsTargetDocs := strings.HasPrefix(req.WorkflowKey, "generate_node_documents")
+	if needsTargetDocs {
 		query := url.Values{}
 		query.Set("include_descendants", "false")
 		query.Set("size", "100")
@@ -740,6 +742,22 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 			Name:                  "生成节点文档(V4)",
 			Description:           "V4版本：单轮生成、简化提示词、内嵌SVG、轻量验证，Token效率提升70%",
 			PrefectDeploymentName: "node-generate-documents-v4-deployment",
+			ParameterSchema:       database.JSONMap{},
+			Enabled:               true,
+		},
+		{
+			WorkflowKey:           "generate_node_documents_v5",
+			Name:                  "生成节点文档(V5)",
+			Description:           "V5版本：XML标签隔离、Recency Bias、SVG规则增强",
+			PrefectDeploymentName: "node-generate-documents-v5-deployment",
+			ParameterSchema:       database.JSONMap{},
+			Enabled:               true,
+		},
+		{
+			WorkflowKey:           "generate_node_documents_v6",
+			Name:                  "生成节点文档(V6)",
+			Description:           "V6版本：分步生成、SVG独立生成、错误隔离",
+			PrefectDeploymentName: "node-generate-documents-v6-deployment",
 			ParameterSchema:       database.JSONMap{},
 			Enabled:               true,
 		},
