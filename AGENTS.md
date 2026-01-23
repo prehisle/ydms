@@ -23,5 +23,24 @@ Go 单测文件紧邻被测代码，命名为 `*_test.go`，可复用 `backend/i
 ## 安全与配置提示
 敏感配置通过 `.env` 管理，禁止提交实际的 `YDMS_NDR_API_KEY`、`YDMS_ADMIN_KEY` 或外部端点。启用 Watch 模式会在 `backend/tmp/` 写入临时二进制，定期清理并确保日志文件不入库。必要时使用环境变量前缀 `YDMS_` 进行覆盖，保持与文档一致。
 
+### API Key 认证架构
+
+PDMS 使用两套独立的 API Key 体系：
+
+| 类型 | 格式 | 用途 |
+|------|------|------|
+| **YDMS API Key** | `ydms_*` | 外部服务（如 IDPP）调用 PDMS API |
+| **NDR API Key** | `ndr_*` | PDMS 内部调用 NDR 微服务 |
+
+**重要设计原则**：
+- PDMS 接收到的 `X-API-Key` header（YDMS API Key）仅用于认证调用方身份
+- PDMS 调用 NDR 时**始终使用配置的 `YDMS_NDR_API_KEY`**，不透传请求中的 API Key
+- 这两套 Key 完全独立，不能混用
+
+**为外部服务创建 API Key**：
+1. 使用超级管理员登录 PDMS
+2. 进入 "API Key 管理" 页面创建新 Key
+3. 将生成的 `ydms_*` 格式 Key 提供给外部服务使用
+
 ## 沟通约定
 所有协作与反馈请统一使用中文表述，确保讨论语境一致、记录易于追溯。
