@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -88,7 +87,7 @@ func (h *StaticProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 写入状态码和响应体
 	w.WriteHeader(resp.StatusCode)
 	if r.Method != http.MethodHead {
-		io.Copy(w, resp.Body)
+		_, _ = io.Copy(w, resp.Body)
 	}
 }
 
@@ -104,5 +103,6 @@ func isHopByHopHeader(header string) bool {
 		"Transfer-Encoding":   true,
 		"Upgrade":             true,
 	}
-	return hopByHopHeaders[strings.Title(strings.ToLower(header))]
+	// 使用 http.CanonicalHeaderKey 替代已废弃的 strings.Title
+	return hopByHopHeaders[http.CanonicalHeaderKey(header)]
 }

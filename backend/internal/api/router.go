@@ -368,54 +368,6 @@ func combineDocumentRoutes(h *Handler, sh *SyncHandler, wh *WorkflowHandler) htt
 	}
 }
 
-// combineDocumentAndSyncRoutes 保留为向后兼容（已废弃，使用 combineDocumentRoutes）
-func combineDocumentAndSyncRoutes(h *Handler, sh *SyncHandler) http.HandlerFunc {
-	return combineDocumentRoutes(h, sh, nil)
-}
-
-// combineNodeAndWorkflowRoutes 组合节点路由和工作流路由
-// 根据路径判断是否是工作流相关请求，分发到对应的处理器
-func combineNodeAndWorkflowRoutes(h *Handler, wh *WorkflowHandler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		relPath := strings.TrimPrefix(path, "/api/v1/nodes/")
-
-		// 解析节点 ID
-		parts := strings.Split(relPath, "/")
-		if len(parts) < 2 {
-			h.NodeRoutes(w, r)
-			return
-		}
-
-		nodeID, err := strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			respondError(w, http.StatusBadRequest, errors.New("invalid node id"))
-			return
-		}
-
-		// 检查是否是工作流相关路由
-		// /api/v1/nodes/{id}/workflows
-		// /api/v1/nodes/{id}/workflows/{workflowKey}/runs
-		// /api/v1/nodes/{id}/workflow-runs
-		if parts[1] == "workflows" {
-			subPath := ""
-			if len(parts) > 2 {
-				subPath = strings.Join(parts[2:], "/")
-			}
-			wh.NodeWorkflowRoutes(w, r, nodeID, subPath)
-			return
-		}
-
-		if parts[1] == "workflow-runs" {
-			wh.NodeWorkflowRoutes(w, r, nodeID, "-runs")
-			return
-		}
-
-		// 其他路由交给原来的节点处理器
-		h.NodeRoutes(w, r)
-	}
-}
-
 // handleAdminWorkflowRoutes 处理管理员工作流相关子路由
 func handleAdminWorkflowRoutes(h *AdminWorkflowHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
