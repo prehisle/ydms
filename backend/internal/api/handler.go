@@ -1150,10 +1150,9 @@ func cloneQuery(values url.Values) url.Values {
 }
 
 func (h *Handler) metaFromRequest(r *http.Request) service.RequestMeta {
-	apiKey := r.Header.Get("x-api-key")
-	if apiKey == "" {
-		apiKey = h.defaults.APIKey
-	}
+	// 始终使用配置的 NDR API Key，不透传请求中的 API Key
+	// 请求中的 X-API-Key 是 YDMS API Key (ydms_*)，不能用于 NDR
+	apiKey := h.defaults.APIKey
 	userID := r.Header.Get("x-user-id")
 	if userID == "" {
 		userID = h.defaults.UserID
