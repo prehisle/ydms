@@ -16,13 +16,15 @@ import (
 type SyncHandler struct {
 	service       *service.SyncService
 	webhookSecret string
+	ndrAPIKey     string // NDR API Key for internal calls
 }
 
 // NewSyncHandler creates a new SyncHandler.
-func NewSyncHandler(svc *service.SyncService, webhookSecret string) *SyncHandler {
+func NewSyncHandler(svc *service.SyncService, webhookSecret string, ndrAPIKey string) *SyncHandler {
 	return &SyncHandler{
 		service:       svc,
 		webhookSecret: webhookSecret,
+		ndrAPIKey:     ndrAPIKey,
 	}
 }
 
@@ -180,7 +182,7 @@ func (h *SyncHandler) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 // getDocumentSnapshot returns a document snapshot for IDPP.
 func (h *SyncHandler) getDocumentSnapshot(w http.ResponseWriter, r *http.Request, docID int64) {
-	// 内部 API 使用 API Key 认证
+	// 内部 API 使用 API Key 认证（验证请求方身份）
 	apiKey := r.Header.Get("X-API-Key")
 	if apiKey == "" {
 		apiKey = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -191,9 +193,11 @@ func (h *SyncHandler) getDocumentSnapshot(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Build RequestMeta with API key
+	// Build RequestMeta with configured NDR API key (not the request's API key)
+	// 请求中的 API Key 是 PDMS API Key (ydms_*)，用于验证调用方身份
+	// 但调用 NDR 需要使用配置的 NDR API Key (ndr_*)
 	meta := service.RequestMeta{
-		APIKey:    apiKey,
+		APIKey:    h.ndrAPIKey, // 使用配置的 NDR API Key
 		UserID:    "idpp-internal", // 内部调用标识
 		RequestID: r.Header.Get("x-request-id"),
 	}

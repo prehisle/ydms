@@ -142,7 +142,7 @@ func runServer() error {
 	courseHandler := api.NewCourseHandler(courseService)
 	apiKeyHandler := api.NewAPIKeyHandler(apiKeyService)
 	assetsHandler := api.NewAssetsHandler(svc, headerDefaults)
-	syncHandler := api.NewSyncHandler(syncService, cfg.Prefect.WebhookSecret)
+	syncHandler := api.NewSyncHandler(syncService, cfg.Prefect.WebhookSecret, cfg.NDR.APIKey)
 	workflowHandler := api.NewWorkflowHandler(workflowService, handler)
 	adminWorkflowHandler := api.NewAdminWorkflowHandler(workflowSyncService)
 	batchHandler := api.NewBatchHandler(batchWorkflowService, batchSyncService)
