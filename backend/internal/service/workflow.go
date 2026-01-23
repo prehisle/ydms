@@ -832,14 +832,9 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 			if err := s.db.Create(&def).Error; err != nil {
 				return fmt.Errorf("failed to create workflow definition %s: %w", def.WorkflowKey, err)
 			}
-		} else if err == nil {
-			// Update enabled status for existing records
-			if existing.Enabled != def.Enabled {
-				if err := s.db.Model(&existing).Update("enabled", def.Enabled).Error; err != nil {
-					return fmt.Errorf("failed to update workflow definition %s: %w", def.WorkflowKey, err)
-				}
-			}
 		}
+		// 注意：不再覆盖已存在工作流的 enabled 状态
+		// 用户在管理界面的自定义设置应该被保留
 	}
 
 	return nil
