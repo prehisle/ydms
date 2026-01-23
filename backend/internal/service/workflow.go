@@ -25,6 +25,9 @@ const (
 	WorkflowStatusCancelled = "cancelled"
 )
 
+// ZombieTaskTimeout 僵尸任务超时时间（超过此时间的 running 任务可被强制终止）
+const ZombieTaskTimeout = 30 * time.Minute
+
 // ErrWorkflowRunNotFound is returned when a workflow run is not found.
 var ErrWorkflowRunNotFound = errors.New("workflow run not found")
 
@@ -534,6 +537,45 @@ func (s *WorkflowService) CancelWorkflowRun(ctx context.Context, runID uint) err
 	return newValidationError("只能取消待执行或运行中的任务（当前状态: %s）", run.Status)
 }
 
+// ForceTerminateWorkflowRun 强制终止僵尸任务（运行超过 30 分钟的任务）
+func (s *WorkflowService) ForceTerminateWorkflowRun(ctx context.Context, runID uint) error {
+	// 先获取任务信息
+	var run database.WorkflowRun
+	if err := s.db.First(&run, runID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrWorkflowRunNotFound
+		}
+		return err
+	}
+
+	// 检查状态：只能终止 pending 或 running 的任务
+	if run.Status != WorkflowStatusPending && run.Status != WorkflowStatusRunning {
+		return newValidationError("只能终止待执行或运行中的任务（当前状态: %s）", run.Status)
+	}
+
+	// 检查是否为僵尸任务（运行超过 30 分钟）
+	var startTime time.Time
+	if run.StartedAt != nil {
+		startTime = *run.StartedAt
+	} else {
+		startTime = run.CreatedAt
+	}
+
+	if time.Since(startTime) < ZombieTaskTimeout {
+		return newValidationError("任务运行时间未超过 30 分钟，请使用普通取消功能")
+	}
+
+	// 强制终止
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status":        WorkflowStatusFailed,
+		"error_message": fmt.Sprintf("任务被强制终止（运行时间超过 %v）", ZombieTaskTimeout),
+		"finished_at":   &now,
+	}
+
+	return s.db.Model(&run).Updates(updates).Error
+}
+
 // ListWorkflowRunsParams parameters for listing workflow runs.
 type ListWorkflowRunsParams struct {
 	NodeID      *int64   // Filter by node ID
@@ -838,4 +880,132 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// CleanupWorkflowRunsParams 清理执行历史的参数
+type CleanupWorkflowRunsParams struct {
+	BeforeDate    *time.Time // 清理此日期之前的记录
+	Status        []string   // 只清理指定状态的记录（为空则清理所有终态）
+	WorkflowKey   *string    // 只清理指定工作流的记录
+	NodeID        *int64     // 只清理指定节点的记录
+	DocumentID    *int64     // 只清理指定文档的记录
+	IncludeZombie bool       // 是否包含僵尸任务（运行超过 30 分钟的 pending/running）
+	DryRun        bool       // 试运行，只返回将被删除的数量
+}
+
+// CleanupWorkflowRunsResponse 清理执行历史的响应
+type CleanupWorkflowRunsResponse struct {
+	DeletedCount int64 `json:"deleted_count"`
+	ZombieCount  int64 `json:"zombie_count,omitempty"` // 清理的僵尸任务数量
+	DryRun       bool  `json:"dry_run"`
+}
+
+// CleanupWorkflowRuns 清理执行历史记录
+// 只清理已完成的任务（success, failed, cancelled），不清理 pending 和 running
+// 如果 IncludeZombie=true，也会清理运行超过 30 分钟的僵尸任务
+func (s *WorkflowService) CleanupWorkflowRuns(ctx context.Context, params CleanupWorkflowRunsParams) (*CleanupWorkflowRunsResponse, error) {
+	// 默认只清理终态记录
+	allowedStatuses := params.Status
+	if len(allowedStatuses) == 0 {
+		allowedStatuses = []string{WorkflowStatusSuccess, WorkflowStatusFailed, WorkflowStatusCancelled}
+	}
+
+	// 验证状态值，确保不会清理 pending 或 running 的任务（除非是僵尸任务）
+	hasActiveStatus := false
+	for _, status := range allowedStatuses {
+		if status == WorkflowStatusPending || status == WorkflowStatusRunning {
+			hasActiveStatus = true
+			if !params.IncludeZombie {
+				return nil, fmt.Errorf("cannot cleanup %s tasks without include_zombie=true", status)
+			}
+		}
+	}
+
+	var totalDeleted int64
+	var zombieDeleted int64
+
+	// 如果包含僵尸任务，先处理僵尸任务
+	if params.IncludeZombie && hasActiveStatus {
+		zombieTimeout := time.Now().Add(-ZombieTaskTimeout)
+		zombieQuery := s.db.WithContext(ctx).Model(&database.WorkflowRun{}).
+			Where("status IN ?", []string{WorkflowStatusPending, WorkflowStatusRunning}).
+			Where("COALESCE(started_at, created_at) < ?", zombieTimeout)
+
+		if params.WorkflowKey != nil {
+			zombieQuery = zombieQuery.Where("workflow_key = ?", *params.WorkflowKey)
+		}
+		if params.NodeID != nil {
+			zombieQuery = zombieQuery.Where("node_id = ?", *params.NodeID)
+		}
+		if params.DocumentID != nil {
+			zombieQuery = zombieQuery.Where("document_id = ?", *params.DocumentID)
+		}
+
+		if params.DryRun {
+			if err := zombieQuery.Count(&zombieDeleted).Error; err != nil {
+				return nil, fmt.Errorf("failed to count zombie tasks: %w", err)
+			}
+		} else {
+			// 先将僵尸任务标记为失败
+			now := time.Now()
+			result := zombieQuery.Updates(map[string]interface{}{
+				"status":        WorkflowStatusFailed,
+				"error_message": fmt.Sprintf("任务被清理（运行时间超过 %v）", ZombieTaskTimeout),
+				"finished_at":   &now,
+			})
+			if result.Error != nil {
+				return nil, fmt.Errorf("failed to mark zombie tasks as failed: %w", result.Error)
+			}
+			zombieDeleted = result.RowsAffected
+		}
+
+		// 从状态列表中移除 pending 和 running，后续只处理终态
+		var filteredStatuses []string
+		for _, status := range allowedStatuses {
+			if status != WorkflowStatusPending && status != WorkflowStatusRunning {
+				filteredStatuses = append(filteredStatuses, status)
+			}
+		}
+		allowedStatuses = filteredStatuses
+	}
+
+	// 处理终态任务
+	if len(allowedStatuses) > 0 {
+		query := s.db.WithContext(ctx).Model(&database.WorkflowRun{}).Where("status IN ?", allowedStatuses)
+
+		if params.BeforeDate != nil {
+			query = query.Where("created_at < ?", *params.BeforeDate)
+		}
+		if params.WorkflowKey != nil {
+			query = query.Where("workflow_key = ?", *params.WorkflowKey)
+		}
+		if params.NodeID != nil {
+			query = query.Where("node_id = ?", *params.NodeID)
+		}
+		if params.DocumentID != nil {
+			query = query.Where("document_id = ?", *params.DocumentID)
+		}
+
+		if params.DryRun {
+			var count int64
+			if err := query.Count(&count).Error; err != nil {
+				return nil, fmt.Errorf("failed to count workflow runs: %w", err)
+			}
+			totalDeleted = count + zombieDeleted
+		} else {
+			result := query.Delete(&database.WorkflowRun{})
+			if result.Error != nil {
+				return nil, fmt.Errorf("failed to delete workflow runs: %w", result.Error)
+			}
+			totalDeleted = result.RowsAffected + zombieDeleted
+		}
+	} else {
+		totalDeleted = zombieDeleted
+	}
+
+	return &CleanupWorkflowRunsResponse{
+		DeletedCount: totalDeleted,
+		ZombieCount:  zombieDeleted,
+		DryRun:       params.DryRun,
+	}, nil
 }

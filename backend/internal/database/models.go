@@ -78,6 +78,7 @@ type DocSyncStatus struct {
 	LastError    string     `gorm:"type:text" json:"last_error,omitempty"`                      // 失败时的错误信息（可能较长）
 	LastRunID    string     `gorm:"size:64" json:"last_run_id,omitempty"`                       // Prefect flow run ID
 	LastSyncedAt *time.Time `json:"last_synced_at,omitempty"`                                   // 最后成功同步时间
+	LastWorkflowRunID *uint `gorm:"index" json:"last_workflow_run_id,omitempty"`                // 关联的 workflow_run 记录 ID
 }
 
 // TableName 指定表名（与其他表保持复数形式一致）

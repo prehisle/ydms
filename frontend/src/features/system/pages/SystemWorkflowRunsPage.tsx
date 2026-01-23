@@ -13,6 +13,10 @@ import {
   message,
   Tooltip,
   Popconfirm,
+  Modal,
+  Checkbox,
+  DatePicker,
+  Form,
 } from "antd";
 import {
   HomeOutlined,
@@ -24,6 +28,7 @@ import {
   FileOutlined,
   FolderOutlined,
   ReloadOutlined,
+  DeleteOutlined,
 } from "@ant-design/icons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -34,6 +39,8 @@ import {
   triggerNodeWorkflow,
   triggerDocumentWorkflow,
   cancelWorkflowRun,
+  forceTerminateWorkflowRun,
+  cleanupWorkflowRuns,
   type WorkflowRun,
 } from "../../../api/workflows";
 import { getCategoryTree, type Category } from "../../../api/categories";
@@ -151,6 +158,15 @@ export const SystemWorkflowRunsPage: FC = () => {
       }),
     enabled: isAdmin,
     placeholderData: (previousData) => previousData,
+    // 智能轮询：有 pending/running 任务时每 3 秒刷新
+    refetchInterval: (query) => {
+      const runs = query.state.data?.runs;
+      if (!runs) return false;
+      const hasActiveRuns = runs.some(
+        (run) => run.status === "pending" || run.status === "running"
+      );
+      return hasActiveRuns ? 3000 : false;
+    },
   });
 
   // 重试工作流
@@ -197,6 +213,101 @@ export const SystemWorkflowRunsPage: FC = () => {
   const handleCancel = (runId: number) => {
     setCancellingRunId(runId);
     cancelMutation.mutate(runId);
+  };
+
+  // 强制终止僵尸任务
+  const [terminatingRunId, setTerminatingRunId] = useState<number | null>(null);
+  const forceTerminateMutation = useMutation({
+    mutationFn: (runId: number) => forceTerminateWorkflowRun(runId),
+    onSuccess: () => {
+      message.success("僵尸任务已强制终止");
+      queryClient.invalidateQueries({ queryKey: ["workflowRuns"] });
+    },
+    onError: (error: Error) => {
+      message.error(`强制终止失败：${error.message}`);
+    },
+    onSettled: () => {
+      setTerminatingRunId(null);
+    },
+  });
+
+  const handleForceTerminate = (runId: number) => {
+    setTerminatingRunId(runId);
+    forceTerminateMutation.mutate(runId);
+  };
+
+  // 判断是否为僵尸任务（运行超过 30 分钟）
+  const isZombieTask = (run: WorkflowRun): boolean => {
+    if (run.status !== "pending" && run.status !== "running") return false;
+    const startTime = run.started_at ? new Date(run.started_at) : new Date(run.created_at);
+    const runningMinutes = (Date.now() - startTime.getTime()) / 1000 / 60;
+    return runningMinutes >= 30;
+  };
+
+  // 清理选项状态
+  const [showCleanupModal, setShowCleanupModal] = useState(false);
+  const [cleanupOptions, setCleanupOptions] = useState({
+    statuses: ["success", "failed", "cancelled"] as string[],
+    beforeDate: null as string | null,
+    includeZombie: false,
+  });
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
+  const [cleanupCount, setCleanupCount] = useState(0);
+  const [zombieCount, setZombieCount] = useState(0);
+
+  // 清理执行历史
+  const cleanupMutation = useMutation({
+    mutationFn: (dryRun: boolean) =>
+      cleanupWorkflowRuns({
+        workflow_key: filters.workflow_key,
+        status: cleanupOptions.includeZombie
+          ? [...cleanupOptions.statuses, "pending", "running"].join(",")
+          : cleanupOptions.statuses.join(","),
+        before_date: cleanupOptions.beforeDate || undefined,
+        include_zombie: cleanupOptions.includeZombie,
+        dry_run: dryRun,
+      }),
+    onSuccess: (data, dryRun) => {
+      if (dryRun) {
+        // 试运行模式，显示将要删除的数量
+        if (data.deleted_count === 0) {
+          message.info("没有符合条件的记录需要清理");
+        } else {
+          // 弹出确认框
+          setCleanupCount(data.deleted_count);
+          setZombieCount(data.zombie_count || 0);
+          setShowCleanupModal(false);
+          setShowCleanupConfirm(true);
+        }
+      } else {
+        const zombieMsg = data.zombie_count ? `（含 ${data.zombie_count} 个僵尸任务）` : "";
+        message.success(`已清理 ${data.deleted_count} 条记录${zombieMsg}`);
+        setShowCleanupConfirm(false);
+        queryClient.invalidateQueries({ queryKey: ["workflowRuns"] });
+      }
+    },
+    onError: (error: Error) => {
+      message.error(`清理失败：${error.message}`);
+    },
+  });
+
+  // 打开清理选项对话框
+  const handleCleanup = () => {
+    setShowCleanupModal(true);
+  };
+
+  // 预览清理数量
+  const previewCleanup = () => {
+    if (cleanupOptions.statuses.length === 0) {
+      message.warning("请至少选择一种状态");
+      return;
+    }
+    cleanupMutation.mutate(true); // 试运行
+  };
+
+  // 确认清理
+  const confirmCleanup = () => {
+    cleanupMutation.mutate(false); // 实际执行
   };
 
   // 格式化时间
@@ -339,18 +450,20 @@ export const SystemWorkflowRunsPage: FC = () => {
     {
       title: "操作",
       key: "actions",
-      width: 120,
+      width: 150,
       fixed: "right" as const,
       render: (_, run) => {
         const canRetry =
           run.status === "failed" || run.status === "cancelled";
         const canCancel =
           run.status === "pending" || run.status === "running";
+        const canForceTerminate = isZombieTask(run);
         const isCancelling = cancellingRunId === run.id;
+        const isTerminating = terminatingRunId === run.id;
 
         return (
           <Space size={0}>
-            {canCancel && (
+            {canCancel && !canForceTerminate && (
               <Popconfirm
                 title="确认取消"
                 description="确定要取消此工作流吗？"
@@ -368,6 +481,28 @@ export const SystemWorkflowRunsPage: FC = () => {
                 >
                   取消
                 </Button>
+              </Popconfirm>
+            )}
+            {canForceTerminate && (
+              <Popconfirm
+                title="强制终止"
+                description="此任务已运行超过 30 分钟，确定要强制终止吗？"
+                onConfirm={() => handleForceTerminate(run.id)}
+                okText="强制终止"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+              >
+                <Tooltip title="任务已运行超过 30 分钟，可强制终止">
+                  <Button
+                    type="link"
+                    size="small"
+                    danger
+                    icon={<CloseCircleOutlined />}
+                    loading={isTerminating}
+                  >
+                    强制终止
+                  </Button>
+                </Tooltip>
               </Popconfirm>
             )}
             {canRetry && (
@@ -487,30 +622,145 @@ export const SystemWorkflowRunsPage: FC = () => {
 
       <Card>
         {/* 筛选区 */}
-        <Space wrap style={{ marginBottom: 16 }}>
-          <Select
-            placeholder="选择工作流"
-            allowClear
-            style={{ width: 200 }}
-            options={workflowOptions}
-            value={filters.workflow_key}
-            onChange={(value) => {
-              setFilters((prev) => ({ ...prev, workflow_key: value }));
-              setPagination((prev) => ({ ...prev, current: 1 }));
-            }}
-          />
-          <Select
-            placeholder="选择状态"
-            allowClear
-            style={{ width: 140 }}
-            options={statusOptions}
-            value={filters.status}
-            onChange={(value) => {
-              setFilters((prev) => ({ ...prev, status: value }));
-              setPagination((prev) => ({ ...prev, current: 1 }));
-            }}
-          />
+        <Space wrap style={{ marginBottom: 16, width: "100%", justifyContent: "space-between" }}>
+          <Space wrap>
+            <Select
+              placeholder="选择工作流"
+              allowClear
+              style={{ width: 200 }}
+              options={workflowOptions}
+              value={filters.workflow_key}
+              onChange={(value) => {
+                setFilters((prev) => ({ ...prev, workflow_key: value }));
+                setPagination((prev) => ({ ...prev, current: 1 }));
+              }}
+            />
+            <Select
+              placeholder="选择状态"
+              allowClear
+              style={{ width: 140 }}
+              options={statusOptions}
+              value={filters.status}
+              onChange={(value) => {
+                setFilters((prev) => ({ ...prev, status: value }));
+                setPagination((prev) => ({ ...prev, current: 1 }));
+              }}
+            />
+          </Space>
+          <Tooltip title="清理执行历史记录">
+            <Button
+              icon={<DeleteOutlined />}
+              onClick={handleCleanup}
+              loading={cleanupMutation.isPending}
+            >
+              清理历史
+            </Button>
+          </Tooltip>
         </Space>
+
+        {/* 清理选项对话框 */}
+        <Modal
+          title="清理执行历史"
+          open={showCleanupModal}
+          onOk={previewCleanup}
+          onCancel={() => setShowCleanupModal(false)}
+          okText="预览"
+          cancelText="取消"
+          okButtonProps={{ loading: cleanupMutation.isPending }}
+        >
+          <Form layout="vertical">
+            <Form.Item label="选择要清理的状态" required>
+              <Checkbox.Group
+                value={cleanupOptions.statuses}
+                onChange={(values) =>
+                  setCleanupOptions((prev) => ({
+                    ...prev,
+                    statuses: values as string[],
+                  }))
+                }
+              >
+                <Space direction="vertical">
+                  <Checkbox value="success">
+                    <Tag color="success" icon={<CheckCircleOutlined />}>成功</Tag>
+                  </Checkbox>
+                  <Checkbox value="failed">
+                    <Tag color="error" icon={<CloseCircleOutlined />}>失败</Tag>
+                  </Checkbox>
+                  <Checkbox value="cancelled">
+                    <Tag color="warning" icon={<StopOutlined />}>已取消</Tag>
+                  </Checkbox>
+                </Space>
+              </Checkbox.Group>
+            </Form.Item>
+            <Form.Item>
+              <Checkbox
+                checked={cleanupOptions.includeZombie}
+                onChange={(e) =>
+                  setCleanupOptions((prev) => ({
+                    ...prev,
+                    includeZombie: e.target.checked,
+                  }))
+                }
+              >
+                <Space>
+                  <span>包含僵尸任务</span>
+                  <Tooltip title="运行超过 30 分钟的待执行/运行中任务，将被标记为失败后清理">
+                    <Tag color="orange">运行中 &gt; 30分钟</Tag>
+                  </Tooltip>
+                </Space>
+              </Checkbox>
+            </Form.Item>
+            <Form.Item label="清理此日期之前的记录（可选）">
+              <DatePicker
+                style={{ width: "100%" }}
+                placeholder="不限制日期"
+                onChange={(date) =>
+                  setCleanupOptions((prev) => ({
+                    ...prev,
+                    beforeDate: date ? date.format("YYYY-MM-DD") : null,
+                  }))
+                }
+              />
+            </Form.Item>
+            {filters.workflow_key && (
+              <Alert
+                type="info"
+                message={`将只清理工作流「${workflows?.find(w => w.workflow_key === filters.workflow_key)?.name || filters.workflow_key}」的记录`}
+                style={{ marginBottom: 0 }}
+              />
+            )}
+          </Form>
+        </Modal>
+
+        {/* 清理确认对话框 */}
+        <Modal
+          title="确认清理"
+          open={showCleanupConfirm}
+          onOk={confirmCleanup}
+          onCancel={() => setShowCleanupConfirm(false)}
+          okText="确认清理"
+          cancelText="取消"
+          okButtonProps={{ danger: true, loading: cleanupMutation.isPending }}
+        >
+          <p>
+            将清理 <Text strong type="danger">{cleanupCount}</Text> 条执行记录
+            {zombieCount > 0 && (
+              <span>（含 <Text strong type="warning">{zombieCount}</Text> 个僵尸任务）</span>
+            )}。
+          </p>
+          <p>
+            <Text type="secondary">
+              清理条件：
+              {cleanupOptions.statuses.map((s) => statusConfig[s]?.label).join("、")}
+              {cleanupOptions.includeZombie && "、僵尸任务"}
+              {cleanupOptions.beforeDate && `，${cleanupOptions.beforeDate} 之前`}
+              {filters.workflow_key && `，工作流：${filters.workflow_key}`}
+            </Text>
+          </p>
+          <p>
+            <Text type="warning">此操作不可撤销，请确认是否继续？</Text>
+          </p>
+        </Modal>
 
         {/* 表格 */}
         <Table

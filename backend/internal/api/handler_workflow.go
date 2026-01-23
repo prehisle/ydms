@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yjxt/ydms/backend/internal/service"
 )
@@ -53,8 +54,15 @@ func (h *WorkflowHandler) WorkflowRoutes(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// DELETE /api/v1/workflows/runs - cleanup workflow runs
+	if relPath == "runs" && r.Method == http.MethodDelete {
+		h.cleanupWorkflowRuns(w, r)
+		return
+	}
+
 	// GET /api/v1/workflows/runs/{runId} - get workflow run
 	// POST /api/v1/workflows/runs/{runId}/cancel - cancel workflow run
+	// POST /api/v1/workflows/runs/{runId}/force-terminate - force terminate zombie task
 	if strings.HasPrefix(relPath, "runs/") {
 		rest := strings.TrimPrefix(relPath, "runs/")
 		// Check for /cancel suffix
@@ -67,6 +75,21 @@ func (h *WorkflowHandler) WorkflowRoutes(w http.ResponseWriter, r *http.Request)
 			}
 			if r.Method == http.MethodPost {
 				h.cancelWorkflowRun(w, r, uint(runID))
+				return
+			}
+			respondError(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
+			return
+		}
+		// Check for /force-terminate suffix
+		if strings.HasSuffix(rest, "/force-terminate") {
+			runIDStr := strings.TrimSuffix(rest, "/force-terminate")
+			runID, err := strconv.ParseUint(runIDStr, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, errors.New("invalid run id"))
+				return
+			}
+			if r.Method == http.MethodPost {
+				h.forceTerminateWorkflowRun(w, r, uint(runID))
 				return
 			}
 			respondError(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
@@ -269,6 +292,29 @@ func (h *WorkflowHandler) cancelWorkflowRun(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// forceTerminateWorkflowRun handles POST /api/v1/workflows/runs/{runId}/force-terminate
+func (h *WorkflowHandler) forceTerminateWorkflowRun(w http.ResponseWriter, r *http.Request, runID uint) {
+	err := h.workflowService.ForceTerminateWorkflowRun(r.Context(), runID)
+	if err != nil {
+		if errors.Is(err, service.ErrWorkflowRunNotFound) {
+			respondError(w, http.StatusNotFound, err)
+			return
+		}
+		var vErr *service.ValidationError
+		if errors.As(err, &vErr) {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "强制终止失败", vErr.Error()))
+			return
+		}
+		respondError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "僵尸任务已强制终止",
+	})
+}
+
 // handleCallback handles POST /api/v1/workflows/callback/{runId}
 func (h *WorkflowHandler) handleCallback(w http.ResponseWriter, r *http.Request, runID uint) {
 	if r.Method != http.MethodPost {
@@ -377,6 +423,71 @@ func (h *WorkflowHandler) listDocumentWorkflowRuns(w http.ResponseWriter, r *htt
 
 	resp, err := h.workflowService.ListWorkflowRuns(r.Context(), params)
 	if err != nil {
+		respondError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// cleanupWorkflowRuns handles DELETE /api/v1/workflows/runs
+func (h *WorkflowHandler) cleanupWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+	// 解析查询参数
+	params := service.CleanupWorkflowRunsParams{}
+
+	// before_date: 清理此日期之前的记录（ISO 8601 格式）
+	if beforeDateStr := r.URL.Query().Get("before_date"); beforeDateStr != "" {
+		beforeDate, err := time.Parse(time.RFC3339, beforeDateStr)
+		if err != nil {
+			// 尝试解析日期格式 (YYYY-MM-DD)
+			beforeDate, err = time.Parse("2006-01-02", beforeDateStr)
+			if err != nil {
+				respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "无效的日期格式", "before_date 应为 ISO 8601 格式或 YYYY-MM-DD"))
+				return
+			}
+		}
+		params.BeforeDate = &beforeDate
+	}
+
+	// status: 只清理指定状态的记录
+	if status := r.URL.Query().Get("status"); status != "" {
+		params.Status = strings.Split(status, ",")
+	}
+
+	// workflow_key: 只清理指定工作流的记录
+	if workflowKey := r.URL.Query().Get("workflow_key"); workflowKey != "" {
+		params.WorkflowKey = &workflowKey
+	}
+
+	// node_id: 只清理指定节点的记录
+	if nodeIDStr := r.URL.Query().Get("node_id"); nodeIDStr != "" {
+		nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
+		if err == nil {
+			params.NodeID = &nodeID
+		}
+	}
+
+	// document_id: 只清理指定文档的记录
+	if documentIDStr := r.URL.Query().Get("document_id"); documentIDStr != "" {
+		documentID, err := strconv.ParseInt(documentIDStr, 10, 64)
+		if err == nil {
+			params.DocumentID = &documentID
+		}
+	}
+
+	// dry_run: 试运行模式
+	params.DryRun = r.URL.Query().Get("dry_run") == "true"
+
+	// include_zombie: 是否包含僵尸任务
+	params.IncludeZombie = r.URL.Query().Get("include_zombie") == "true"
+
+	resp, err := h.workflowService.CleanupWorkflowRuns(r.Context(), params)
+	if err != nil {
+		var vErr *service.ValidationError
+		if errors.As(err, &vErr) {
+			respondAPIError(w, NewAPIError(ErrCodeValidation, http.StatusBadRequest, "清理失败", vErr.Error()))
+			return
+		}
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}

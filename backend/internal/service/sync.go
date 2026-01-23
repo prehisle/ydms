@@ -33,6 +33,12 @@ const (
 	SyncStatusSkipped = "skipped"
 )
 
+// SyncPendingTimeout 同步任务超时时间（超过此时间的 pending 状态视为超时，允许重新同步）
+const SyncPendingTimeout = 1 * time.Minute
+
+// SyncWorkflowKey 同步工作流的 key（用于记录到 workflow_runs）
+const SyncWorkflowKey = "sync_to_mysql"
+
 // SyncService 处理文档同步到外部 MySQL 数据库的服务
 type SyncService struct {
 	db             *gorm.DB
@@ -154,37 +160,63 @@ func (s *SyncService) TriggerSync(
 	var existingStatus database.DocSyncStatus
 	err = s.db.WithContext(ctx).Where("document_id = ?", docID).First(&existingStatus).Error
 	if err == nil {
-		// 如果已有记录且状态为 pending，返回现有任务信息
+		// 如果已有记录且状态为 pending，检查是否超时
 		if existingStatus.LastStatus == SyncStatusPending {
-			return &TriggerSyncResponse{
-				EventID:          existingStatus.LastEventID,
-				Status:           SyncStatusPending,
-				Message:          "sync task already in progress",
-				DocumentID:       docID,
-				DocumentVersion:  existingStatus.LastVersion,
-				PrefectFlowRunID: existingStatus.LastRunID,
-				SyncTarget:       syncTarget,
-				IdempotencyKey:   idempotencyKey,
-			}, nil
+			// 检查是否超过超时时间（1 分钟）
+			if time.Since(existingStatus.UpdatedAt) < SyncPendingTimeout {
+				return &TriggerSyncResponse{
+					EventID:          existingStatus.LastEventID,
+					Status:           SyncStatusPending,
+					Message:          "sync task already in progress",
+					DocumentID:       docID,
+					DocumentVersion:  existingStatus.LastVersion,
+					PrefectFlowRunID: existingStatus.LastRunID,
+					SyncTarget:       syncTarget,
+					IdempotencyKey:   idempotencyKey,
+				}, nil
+			}
+			// 超时了，将旧任务标记为失败，然后继续创建新任务
+			s.markSyncTimeout(ctx, docID, existingStatus.LastEventID, existingStatus.LastWorkflowRunID)
 		}
 	}
 
 	// 5. 生成新的 event_id
 	eventID := uuid.New().String()
 
-	// 6. 在事务中创建/更新同步状态记录
+	// 6. 在事务中创建/更新同步状态记录，并创建 workflow_run 记录
+	var workflowRunID uint
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 6.1 创建 workflow_run 记录
+		documentID := docID
+		run := database.WorkflowRun{
+			WorkflowKey: SyncWorkflowKey,
+			DocumentID:  &documentID,
+			Parameters: database.JSONMap{
+				"event_id":    eventID,
+				"doc_version": docVersion,
+				"sync_target": syncTarget,
+			},
+			Status:      WorkflowStatusPending,
+			CreatedByID: &meta.UserIDNumeric,
+		}
+		if err := tx.Create(&run).Error; err != nil {
+			return fmt.Errorf("failed to create workflow run: %w", err)
+		}
+		workflowRunID = run.ID
+
+		// 6.2 创建/更新同步状态记录
 		var status database.DocSyncStatus
 		result := tx.Where("document_id = ?", docID).First(&status)
 
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			// 创建新记录
 			status = database.DocSyncStatus{
-				DocumentID:  docID,
-				LastEventID: eventID,
-				LastVersion: docVersion,
-				LastStatus:  SyncStatusPending,
-				LastError:   "",
+				DocumentID:        docID,
+				LastEventID:       eventID,
+				LastVersion:       docVersion,
+				LastStatus:        SyncStatusPending,
+				LastError:         "",
+				LastWorkflowRunID: &workflowRunID,
 			}
 			return tx.Create(&status).Error
 		}
@@ -195,11 +227,12 @@ func (s *SyncService) TriggerSync(
 
 		// 更新现有记录
 		return tx.Model(&status).Updates(map[string]interface{}{
-			"last_event_id": eventID,
-			"last_version":  docVersion,
-			"last_status":   SyncStatusPending,
-			"last_error":    "",
-			"last_run_id":   "",
+			"last_event_id":        eventID,
+			"last_version":         docVersion,
+			"last_status":          SyncStatusPending,
+			"last_error":           "",
+			"last_run_id":          "",
+			"last_workflow_run_id": workflowRunID,
 		}).Error
 	})
 
@@ -306,7 +339,38 @@ func (s *SyncService) HandleSyncCallback(ctx context.Context, callback SyncCallb
 		updates["last_run_id"] = callback.RunID
 	}
 
-	return s.db.WithContext(ctx).Model(&status).Updates(updates).Error
+	// 更新 doc_sync_status
+	if err := s.db.WithContext(ctx).Model(&status).Updates(updates).Error; err != nil {
+		return err
+	}
+
+	// 同步更新关联的 workflow_run 记录
+	if status.LastWorkflowRunID != nil && *status.LastWorkflowRunID > 0 {
+		workflowStatus := WorkflowStatusSuccess
+		if callback.Status == SyncStatusFailed {
+			workflowStatus = WorkflowStatusFailed
+		} else if callback.Status == SyncStatusSkipped {
+			workflowStatus = WorkflowStatusCancelled
+		}
+
+		workflowUpdates := map[string]interface{}{
+			"status":      workflowStatus,
+			"finished_at": &now,
+		}
+		if callback.Status == SyncStatusFailed && callback.Error != "" {
+			workflowUpdates["error_message"] = callback.Error
+		}
+		if callback.RunID != "" {
+			workflowUpdates["prefect_flow_run_id"] = callback.RunID
+		}
+
+		s.db.WithContext(ctx).
+			Model(&database.WorkflowRun{}).
+			Where("id = ?", *status.LastWorkflowRunID).
+			Updates(workflowUpdates)
+	}
+
+	return nil
 }
 
 // GetSyncStatus 获取文档的同步状态
@@ -385,6 +449,33 @@ type DocumentSnapshot struct {
 }
 
 // Helper functions
+
+// markSyncTimeout 将超时的同步任务标记为失败
+func (s *SyncService) markSyncTimeout(ctx context.Context, docID int64, eventID string, workflowRunID *uint) {
+	now := time.Now()
+	errorMsg := "sync task timeout (exceeded 1 minute)"
+
+	// 更新 doc_sync_status
+	s.db.WithContext(ctx).
+		Model(&database.DocSyncStatus{}).
+		Where("document_id = ? AND last_event_id = ? AND last_status = ?", docID, eventID, SyncStatusPending).
+		Updates(map[string]interface{}{
+			"last_status": SyncStatusFailed,
+			"last_error":  errorMsg,
+		})
+
+	// 更新关联的 workflow_run
+	if workflowRunID != nil && *workflowRunID > 0 {
+		s.db.WithContext(ctx).
+			Model(&database.WorkflowRun{}).
+			Where("id = ? AND status IN ?", *workflowRunID, []string{WorkflowStatusPending, WorkflowStatusRunning}).
+			Updates(map[string]interface{}{
+				"status":        WorkflowStatusFailed,
+				"error_message": errorMsg,
+				"finished_at":   &now,
+			})
+	}
+}
 
 // updateSyncStatusWithCondition 条件更新同步状态（防止覆盖回调结果）
 func (s *SyncService) updateSyncStatusWithCondition(ctx context.Context, docID int64, eventID string, status string, errorMsg string, runID string) error {

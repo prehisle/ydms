@@ -134,35 +134,37 @@ export const SyncButton: FC<SyncButtonProps> = ({ documentId, disabled }) => {
 
   return (
     <>
-      <Tooltip title={getTooltipContent()}>
-        <Button
-          icon={getStatusIcon()}
-          onClick={() => {
-            if (hasSyncTarget) {
-              syncMutation.mutate();
-            } else {
-              setDetailModalOpen(true);
-            }
-          }}
-          disabled={disabled || isPending || loadingStatus}
-          loading={syncMutation.isPending}
-        >
-          同步
-        </Button>
-      </Tooltip>
+      <Space.Compact>
+        <Tooltip title={getTooltipContent()}>
+          <Button
+            icon={getStatusIcon()}
+            onClick={() => {
+              if (hasSyncTarget) {
+                syncMutation.mutate();
+              } else {
+                setDetailModalOpen(true);
+              }
+            }}
+            disabled={disabled || isPending || loadingStatus}
+            loading={syncMutation.isPending}
+          >
+            同步
+          </Button>
+        </Tooltip>
 
-      {hasSyncTarget && lastStatus && (
-        <Button
-          type="link"
-          size="small"
-          onClick={() => setDetailModalOpen(true)}
-          style={{ marginLeft: 4, padding: "0 4px" }}
-        >
-          <Tag color={statusColors[lastStatus]} style={{ margin: 0 }}>
-            {statusLabels[lastStatus]}
-          </Tag>
-        </Button>
-      )}
+        {hasSyncTarget && lastStatus && (
+          <Button
+            type="default"
+            size="middle"
+            onClick={() => setDetailModalOpen(true)}
+            style={{ padding: "0 8px" }}
+          >
+            <Tag color={statusColors[lastStatus]} style={{ margin: 0 }}>
+              {statusLabels[lastStatus]}
+            </Tag>
+          </Button>
+        )}
+      </Space.Compact>
 
       <Modal
         title="MySQL 同步状态"

@@ -123,6 +123,13 @@ export async function cancelWorkflowRun(runId: number): Promise<{ success: boole
   });
 }
 
+// 强制终止僵尸任务（运行超过 30 分钟的任务）
+export async function forceTerminateWorkflowRun(runId: number): Promise<{ success: boolean; message: string }> {
+  return http<{ success: boolean; message: string }>(`/api/v1/workflows/runs/${runId}/force-terminate`, {
+    method: "POST",
+  });
+}
+
 // 获取所有工作流运行记录（全局）
 export async function listWorkflowRuns(params?: {
   node_id?: number;
@@ -250,5 +257,45 @@ export async function updateAdminWorkflow(
       method: "PATCH",
       body: JSON.stringify(data),
     }
+  );
+}
+
+// ===== 清理执行历史 API =====
+
+// 清理执行历史参数
+export interface CleanupWorkflowRunsParams {
+  before_date?: string;  // ISO 8601 格式或 YYYY-MM-DD
+  status?: string;       // 逗号分隔的状态列表
+  workflow_key?: string;
+  node_id?: number;
+  document_id?: number;
+  include_zombie?: boolean;  // 是否包含僵尸任务
+  dry_run?: boolean;     // 试运行模式
+}
+
+// 清理执行历史响应
+export interface CleanupWorkflowRunsResponse {
+  deleted_count: number;
+  zombie_count?: number;  // 清理的僵尸任务数量
+  dry_run: boolean;
+}
+
+// 清理执行历史
+export async function cleanupWorkflowRuns(
+  params?: CleanupWorkflowRunsParams
+): Promise<CleanupWorkflowRunsResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.before_date) searchParams.set("before_date", params.before_date);
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.workflow_key) searchParams.set("workflow_key", params.workflow_key);
+  if (params?.node_id) searchParams.set("node_id", String(params.node_id));
+  if (params?.document_id) searchParams.set("document_id", String(params.document_id));
+  if (params?.include_zombie) searchParams.set("include_zombie", "true");
+  if (params?.dry_run) searchParams.set("dry_run", "true");
+
+  const query = searchParams.toString();
+  return http<CleanupWorkflowRunsResponse>(
+    `/api/v1/workflows/runs${query ? `?${query}` : ""}`,
+    { method: "DELETE" }
   );
 }
