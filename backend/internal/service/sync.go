@@ -276,11 +276,23 @@ func (s *SyncService) TriggerSync(
 	flowRun, err := s.prefect.CreateFlowRun(ctx, deployment.ID, flowParams)
 	if err != nil {
 		_ = s.updateSyncStatusWithCondition(ctx, docID, eventID, SyncStatusFailed, fmt.Sprintf("failed to create flow run: %s", err.Error()), "")
+		// 同时更新 workflow_runs 表
+		s.db.WithContext(ctx).Model(&database.WorkflowRun{}).
+			Where("id = ?", workflowRunID).
+			Updates(map[string]interface{}{
+				"status":        WorkflowStatusFailed,
+				"error_message": fmt.Sprintf("failed to create flow run: %s", err.Error()),
+				"finished_at":   time.Now(),
+			})
 		return nil, fmt.Errorf("failed to create flow run: %w", err)
 	}
 
-	// 11. 更新 flow run ID（使用条件更新）
+	// 11. 更新 flow run ID（同时更新 doc_sync_statuses 和 workflow_runs）
 	_ = s.updateSyncStatusWithCondition(ctx, docID, eventID, SyncStatusPending, "", flowRun.ID)
+	// 更新 workflow_runs 表的 prefect_flow_run_id
+	s.db.WithContext(ctx).Model(&database.WorkflowRun{}).
+		Where("id = ?", workflowRunID).
+		Update("prefect_flow_run_id", flowRun.ID)
 
 	return &TriggerSyncResponse{
 		EventID:          eventID,
