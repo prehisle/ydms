@@ -884,13 +884,14 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 
 // CleanupWorkflowRunsParams 清理执行历史的参数
 type CleanupWorkflowRunsParams struct {
-	BeforeDate    *time.Time // 清理此日期之前的记录
-	Status        []string   // 只清理指定状态的记录（为空则清理所有终态）
-	WorkflowKey   *string    // 只清理指定工作流的记录
-	NodeID        *int64     // 只清理指定节点的记录
-	DocumentID    *int64     // 只清理指定文档的记录
-	IncludeZombie bool       // 是否包含僵尸任务（运行超过 30 分钟的 pending/running）
-	DryRun        bool       // 试运行，只返回将被删除的数量
+	BeforeDate         *time.Time // 清理此日期之前的记录
+	Status             []string   // 只清理指定状态的记录（为空则清理所有终态）
+	WorkflowKey        *string    // 只清理指定工作流的记录
+	NodeID             *int64     // 只清理指定节点的记录
+	DocumentID         *int64     // 只清理指定文档的记录
+	IncludeZombie      bool       // 是否包含僵尸任务（运行超过 30 分钟的 pending/running）
+	ForceCleanupActive bool       // 强制清理所有 pending/running 任务（不仅仅是僵尸任务）
+	DryRun             bool       // 试运行，只返回将被删除的数量
 }
 
 // CleanupWorkflowRunsResponse 清理执行历史的响应
@@ -903,6 +904,7 @@ type CleanupWorkflowRunsResponse struct {
 // CleanupWorkflowRuns 清理执行历史记录
 // 只清理已完成的任务（success, failed, cancelled），不清理 pending 和 running
 // 如果 IncludeZombie=true，也会清理运行超过 30 分钟的僵尸任务
+// 如果 ForceCleanupActive=true，会清理所有 pending/running 任务（不仅仅是僵尸任务）
 func (s *WorkflowService) CleanupWorkflowRuns(ctx context.Context, params CleanupWorkflowRunsParams) (*CleanupWorkflowRunsResponse, error) {
 	// 默认只清理终态记录
 	allowedStatuses := params.Status
@@ -910,22 +912,61 @@ func (s *WorkflowService) CleanupWorkflowRuns(ctx context.Context, params Cleanu
 		allowedStatuses = []string{WorkflowStatusSuccess, WorkflowStatusFailed, WorkflowStatusCancelled}
 	}
 
-	// 验证状态值，确保不会清理 pending 或 running 的任务（除非是僵尸任务）
+	// 验证状态值，确保不会清理 pending 或 running 的任务（除非启用了相关选项）
 	hasActiveStatus := false
 	for _, status := range allowedStatuses {
 		if status == WorkflowStatusPending || status == WorkflowStatusRunning {
 			hasActiveStatus = true
-			if !params.IncludeZombie {
-				return nil, fmt.Errorf("cannot cleanup %s tasks without include_zombie=true", status)
+			if !params.IncludeZombie && !params.ForceCleanupActive {
+				return nil, fmt.Errorf("cannot cleanup %s tasks without include_zombie=true or force_cleanup_active=true", status)
 			}
 		}
 	}
 
 	var totalDeleted int64
 	var zombieDeleted int64
+	var forceDeleted int64
 
-	// 如果包含僵尸任务，先处理僵尸任务
-	if params.IncludeZombie && hasActiveStatus {
+	// 如果强制清理所有活跃任务
+	if params.ForceCleanupActive && hasActiveStatus {
+		forceQuery := s.db.WithContext(ctx).Model(&database.WorkflowRun{}).
+			Where("status IN ?", []string{WorkflowStatusPending, WorkflowStatusRunning})
+
+		if params.BeforeDate != nil {
+			forceQuery = forceQuery.Where("created_at < ?", *params.BeforeDate)
+		}
+		if params.WorkflowKey != nil {
+			forceQuery = forceQuery.Where("workflow_key = ?", *params.WorkflowKey)
+		}
+		if params.NodeID != nil {
+			forceQuery = forceQuery.Where("node_id = ?", *params.NodeID)
+		}
+		if params.DocumentID != nil {
+			forceQuery = forceQuery.Where("document_id = ?", *params.DocumentID)
+		}
+
+		if params.DryRun {
+			if err := forceQuery.Count(&forceDeleted).Error; err != nil {
+				return nil, fmt.Errorf("failed to count active tasks: %w", err)
+			}
+		} else {
+			result := forceQuery.Delete(&database.WorkflowRun{})
+			if result.Error != nil {
+				return nil, fmt.Errorf("failed to delete active tasks: %w", result.Error)
+			}
+			forceDeleted = result.RowsAffected
+		}
+
+		// 从状态列表中移除 pending 和 running，后续只处理终态
+		var filteredStatuses []string
+		for _, status := range allowedStatuses {
+			if status != WorkflowStatusPending && status != WorkflowStatusRunning {
+				filteredStatuses = append(filteredStatuses, status)
+			}
+		}
+		allowedStatuses = filteredStatuses
+	} else if params.IncludeZombie && hasActiveStatus {
+		// 如果只包含僵尸任务，处理僵尸任务
 		zombieTimeout := time.Now().Add(-ZombieTaskTimeout)
 		zombieQuery := s.db.WithContext(ctx).Model(&database.WorkflowRun{}).
 			Where("status IN ?", []string{WorkflowStatusPending, WorkflowStatusRunning}).
@@ -991,16 +1032,16 @@ func (s *WorkflowService) CleanupWorkflowRuns(ctx context.Context, params Cleanu
 			if err := query.Count(&count).Error; err != nil {
 				return nil, fmt.Errorf("failed to count workflow runs: %w", err)
 			}
-			totalDeleted = count + zombieDeleted
+			totalDeleted = count + zombieDeleted + forceDeleted
 		} else {
 			result := query.Delete(&database.WorkflowRun{})
 			if result.Error != nil {
 				return nil, fmt.Errorf("failed to delete workflow runs: %w", result.Error)
 			}
-			totalDeleted = result.RowsAffected + zombieDeleted
+			totalDeleted = result.RowsAffected + zombieDeleted + forceDeleted
 		}
 	} else {
-		totalDeleted = zombieDeleted
+		totalDeleted = zombieDeleted + forceDeleted
 	}
 
 	return &CleanupWorkflowRunsResponse{

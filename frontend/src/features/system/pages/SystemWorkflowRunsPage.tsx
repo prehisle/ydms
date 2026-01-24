@@ -250,6 +250,7 @@ export const SystemWorkflowRunsPage: FC = () => {
     statuses: ["success", "failed", "cancelled"] as string[],
     beforeDate: null as string | null,
     includeZombie: false,
+    forceCleanupActive: false,
   });
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
   const [cleanupCount, setCleanupCount] = useState(0);
@@ -260,11 +261,10 @@ export const SystemWorkflowRunsPage: FC = () => {
     mutationFn: (dryRun: boolean) =>
       cleanupWorkflowRuns({
         workflow_key: filters.workflow_key,
-        status: cleanupOptions.includeZombie
-          ? [...cleanupOptions.statuses, "pending", "running"].join(",")
-          : cleanupOptions.statuses.join(","),
+        status: cleanupOptions.statuses.join(","),
         before_date: cleanupOptions.beforeDate || undefined,
         include_zombie: cleanupOptions.includeZombie,
+        force_cleanup_active: cleanupOptions.forceCleanupActive,
         dry_run: dryRun,
       }),
     onSuccess: (data, dryRun) => {
@@ -300,6 +300,14 @@ export const SystemWorkflowRunsPage: FC = () => {
   const previewCleanup = () => {
     if (cleanupOptions.statuses.length === 0) {
       message.warning("请至少选择一种状态");
+      return;
+    }
+    // 如果选择了 pending/running 但没有启用强制清理或僵尸任务选项
+    const hasActiveStatus = cleanupOptions.statuses.some(
+      (s) => s === "pending" || s === "running"
+    );
+    if (hasActiveStatus && !cleanupOptions.forceCleanupActive && !cleanupOptions.includeZombie) {
+      message.warning("清理待执行/运行中任务需要启用「强制清理」或「仅清理僵尸任务」选项");
       return;
     }
     cleanupMutation.mutate(true); // 试运行
@@ -689,12 +697,39 @@ export const SystemWorkflowRunsPage: FC = () => {
                   <Checkbox value="cancelled">
                     <Tag color="warning" icon={<StopOutlined />}>已取消</Tag>
                   </Checkbox>
+                  <Checkbox value="pending">
+                    <Tag color="default" icon={<ClockCircleOutlined />}>待执行</Tag>
+                  </Checkbox>
+                  <Checkbox value="running">
+                    <Tag color="processing" icon={<SyncOutlined />}>运行中</Tag>
+                  </Checkbox>
                 </Space>
               </Checkbox.Group>
             </Form.Item>
             <Form.Item>
               <Checkbox
+                checked={cleanupOptions.forceCleanupActive}
+                onChange={(e) =>
+                  setCleanupOptions((prev) => ({
+                    ...prev,
+                    forceCleanupActive: e.target.checked,
+                    // 如果启用强制清理，自动禁用僵尸任务选项
+                    includeZombie: e.target.checked ? false : prev.includeZombie,
+                  }))
+                }
+              >
+                <Space>
+                  <span>强制清理所有待执行/运行中任务</span>
+                  <Tooltip title="直接删除所有选中的待执行/运行中任务，不限制运行时间">
+                    <Tag color="red">危险操作</Tag>
+                  </Tooltip>
+                </Space>
+              </Checkbox>
+            </Form.Item>
+            <Form.Item>
+              <Checkbox
                 checked={cleanupOptions.includeZombie}
+                disabled={cleanupOptions.forceCleanupActive}
                 onChange={(e) =>
                   setCleanupOptions((prev) => ({
                     ...prev,
@@ -703,8 +738,8 @@ export const SystemWorkflowRunsPage: FC = () => {
                 }
               >
                 <Space>
-                  <span>包含僵尸任务</span>
-                  <Tooltip title="运行超过 30 分钟的待执行/运行中任务，将被标记为失败后清理">
+                  <span>仅清理僵尸任务</span>
+                  <Tooltip title="只清理运行超过 30 分钟的待执行/运行中任务">
                     <Tag color="orange">运行中 &gt; 30分钟</Tag>
                   </Tooltip>
                 </Space>

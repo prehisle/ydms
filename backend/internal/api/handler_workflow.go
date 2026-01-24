@@ -481,6 +481,9 @@ func (h *WorkflowHandler) cleanupWorkflowRuns(w http.ResponseWriter, r *http.Req
 	// include_zombie: 是否包含僵尸任务
 	params.IncludeZombie = r.URL.Query().Get("include_zombie") == "true"
 
+	// force_cleanup_active: 强制清理所有 pending/running 任务
+	params.ForceCleanupActive = r.URL.Query().Get("force_cleanup_active") == "true"
+
 	resp, err := h.workflowService.CleanupWorkflowRuns(r.Context(), params)
 	if err != nil {
 		var vErr *service.ValidationError

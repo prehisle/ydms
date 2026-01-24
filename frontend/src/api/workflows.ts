@@ -270,6 +270,7 @@ export interface CleanupWorkflowRunsParams {
   node_id?: number;
   document_id?: number;
   include_zombie?: boolean;  // 是否包含僵尸任务
+  force_cleanup_active?: boolean;  // 强制清理所有 pending/running 任务
   dry_run?: boolean;     // 试运行模式
 }
 
@@ -291,6 +292,7 @@ export async function cleanupWorkflowRuns(
   if (params?.node_id) searchParams.set("node_id", String(params.node_id));
   if (params?.document_id) searchParams.set("document_id", String(params.document_id));
   if (params?.include_zombie) searchParams.set("include_zombie", "true");
+  if (params?.force_cleanup_active) searchParams.set("force_cleanup_active", "true");
   if (params?.dry_run) searchParams.set("dry_run", "true");
 
   const query = searchParams.toString();
