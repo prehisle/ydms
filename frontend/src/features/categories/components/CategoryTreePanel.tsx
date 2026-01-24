@@ -118,7 +118,7 @@ export interface CategoryTreePanelProps {
   setIsMutating: (value: boolean) => void;
   onDocumentDrop?: (targetNodeId: number, dragData: any) => void;
   onOpenBatchWorkflow?: (nodeIds: number[], nodeNames: string[]) => void;
-  onOpenBatchSync?: (nodeId: number, nodeName: string) => void;
+  onOpenBatchSync?: (nodeIds: number[], nodeNames: string[]) => void;
   /** 外部跳转时需要滚动到的节点 ID，设置后会自动展开路径并滚动 */
   scrollToNodeId?: number | null;
   /** 滚动完成后的回调，用于清除 scrollToNodeId */
@@ -797,7 +797,18 @@ export function CategoryTreePanel({
           disabled: isMutating,
           onClick: () => {
             closeContextMenu("action:batch-sync");
-            onOpenBatchSync(nodeId, targetNode.name);
+            // 支持多选：如果有选中的节点，使用选中的节点；否则使用右键点击的节点
+            const targetIds = selectedIds.length > 0 ? selectedIds : [nodeId];
+            const targetNames = selectedIds.length > 0
+              ? selectedIds.map(id => lookups.byId.get(id)?.name || `节点${id}`)
+              : [targetNode.name];
+
+            if (targetIds.length === 0) {
+              messageApi.warning("请先选择要同步的节点");
+              return;
+            }
+
+            onOpenBatchSync(targetIds, targetNames);
           },
         });
       }

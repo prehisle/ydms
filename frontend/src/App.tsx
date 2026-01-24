@@ -518,9 +518,9 @@ export const DocumentsPage = () => {
 
   const [batchSyncModal, setBatchSyncModal] = useState<{
     open: boolean;
-    nodeId: number;
-    nodeName: string;
-  }>({ open: false, nodeId: 0, nodeName: "" });
+    nodeIds: number[];
+    nodeNames: string[];
+  }>({ open: false, nodeIds: [], nodeNames: [] });
 
   const handleOpenBatchWorkflow = useCallback((nodeIds: number[], nodeNames: string[]) => {
     setBatchWorkflowModal({ open: true, nodeIds, nodeNames });
@@ -530,8 +530,8 @@ export const DocumentsPage = () => {
     setBatchWorkflowModal((prev) => ({ ...prev, open: false }));
   }, []);
 
-  const handleOpenBatchSync = useCallback((nodeId: number, nodeName: string) => {
-    setBatchSyncModal({ open: true, nodeId, nodeName });
+  const handleOpenBatchSync = useCallback((nodeIds: number[], nodeNames: string[]) => {
+    setBatchSyncModal({ open: true, nodeIds, nodeNames });
   }, []);
 
   const handleCloseBatchSync = useCallback(() => {
@@ -1054,8 +1054,8 @@ export const DocumentsPage = () => {
       />
       <BatchSyncModal
         open={batchSyncModal.open}
-        nodeId={batchSyncModal.nodeId}
-        nodeName={batchSyncModal.nodeName}
+        nodeIds={batchSyncModal.nodeIds}
+        nodeNames={batchSyncModal.nodeNames}
         onClose={handleCloseBatchSync}
         onSuccess={invalidateAllQueries}
       />

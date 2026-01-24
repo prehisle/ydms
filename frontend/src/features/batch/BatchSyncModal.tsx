@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import {
   Modal,
   Steps,
@@ -22,7 +22,7 @@ import {
   ExclamationCircleOutlined,
   LoadingOutlined,
 } from "@ant-design/icons";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   previewBatchSync,
@@ -65,66 +65,161 @@ const statusLabels: Record<string, string> = {
   skipped: "跳过",
 };
 
-interface BatchSyncModalProps {
-  open: boolean;
+// 单个节点的执行结果
+interface NodeExecutionResult {
   nodeId: number;
   nodeName: string;
+  batchId: string;
+  status: BatchSyncStatusResponse;
+}
+
+interface BatchSyncModalProps {
+  open: boolean;
+  nodeIds: number[];
+  nodeNames: string[];
   onClose: () => void;
   onSuccess?: () => void;
 }
 
 export function BatchSyncModal({
   open,
-  nodeId,
-  nodeName,
+  nodeIds,
+  nodeNames,
   onClose,
   onSuccess,
 }: BatchSyncModalProps) {
+  const queryClient = useQueryClient();
+
+  // 节点数量
+  const nodeCount = nodeIds.length;
+
   // 步骤状态
   const [currentStep, setCurrentStep] = useState(0);
 
   // 配置状态
   const [includeDescendants, setIncludeDescendants] = useState(true);
 
-  // 预览和执行状态
+  // 预览状态
   const [previewData, setPreviewData] = useState<BatchSyncPreviewResponse | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [batchId, setBatchId] = useState<string | null>(null);
-  const [executeLoading, setExecuteLoading] = useState(false);
 
-  // 轮询批次状态
+  // 串行执行状态
+  const [currentNodeIndex, setCurrentNodeIndex] = useState(0);
+  const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
+  const [executeLoading, setExecuteLoading] = useState(false);
+  const [executionResults, setExecutionResults] = useState<NodeExecutionResult[]>([]);
+  const isExecutingRef = useRef(false);
+
+  // 轮询当前批次状态
   const { data: batchStatus } = useQuery({
-    queryKey: ["batch-sync-status", batchId],
-    queryFn: () => getBatchSyncStatus(batchId!),
-    enabled: currentStep === 2 && batchId !== null,
+    queryKey: ["batch-sync-status", currentBatchId],
+    queryFn: () => getBatchSyncStatus(currentBatchId!),
+    enabled: currentStep === 2 && currentBatchId !== null,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       if (status === "completed" || status === "failed" || status === "cancelled") {
-        return false; // 停止轮询
+        return false;
       }
-      return 2000; // 每 2 秒轮询
+      return 2000;
     },
   });
 
-  // 批次完成时自动跳转到完成步骤
+  // 执行下一个节点的函数
+  const executeNextNode = useCallback(async (
+    nodeIndex: number,
+    results: NodeExecutionResult[]
+  ) => {
+    if (nodeIndex >= nodeIds.length) {
+      // 所有节点执行完毕
+      setExecutionResults(results);
+      setCurrentStep(3);
+      if (onSuccess) {
+        onSuccess();
+      }
+      isExecutingRef.current = false;
+      return;
+    }
+
+    const nodeId = nodeIds[nodeIndex];
+    const nodeName = nodeNames[nodeIndex];
+
+    try {
+      const result = await executeBatchSync(nodeId, {
+        include_descendants: includeDescendants,
+        concurrency: 3,
+      });
+
+      setCurrentNodeIndex(nodeIndex);
+      setCurrentBatchId(result.batch_id);
+    } catch (error) {
+      message.error(`节点 "${nodeName}" 执行失败: ${(error as Error).message}`);
+      // 即使失败也继续下一个节点
+      const failedResult: NodeExecutionResult = {
+        nodeId,
+        nodeName,
+        batchId: "",
+        status: {
+          batch_id: "",
+          root_node_id: nodeId,
+          status: "failed",
+          total_documents: 0,
+          success_count: 0,
+          failed_count: 1,
+          skipped_count: 0,
+          progress: 100,
+          error_message: (error as Error).message,
+          created_at: new Date().toISOString(),
+        },
+      };
+      executeNextNode(nodeIndex + 1, [...results, failedResult]);
+    }
+  }, [nodeIds, nodeNames, includeDescendants, onSuccess]);
+
+  // 当前批次完成时，处理下一个节点
   useEffect(() => {
-    if (batchStatus && currentStep === 2) {
-      const { status } = batchStatus;
-      if (status === "completed" || status === "failed" || status === "cancelled") {
+    if (!batchStatus || currentStep !== 2 || !isExecutingRef.current) return;
+
+    const { status } = batchStatus;
+    if (status === "completed" || status === "failed" || status === "cancelled") {
+      // 当前批次完成，保存结果并处理下一个节点
+      const currentResult: NodeExecutionResult = {
+        nodeId: nodeIds[currentNodeIndex],
+        nodeName: nodeNames[currentNodeIndex],
+        batchId: currentBatchId || "",
+        status: batchStatus,
+      };
+
+      const newResults = [...executionResults, currentResult];
+      setExecutionResults(newResults);
+
+      // 清除当前批次状态缓存
+      queryClient.removeQueries({ queryKey: ["batch-sync-status", currentBatchId] });
+
+      // 处理下一个节点
+      const nextIndex = currentNodeIndex + 1;
+      if (nextIndex < nodeIds.length) {
+        setCurrentBatchId(null);
+        executeNextNode(nextIndex, newResults);
+      } else {
+        // 所有节点执行完毕
         setCurrentStep(3);
-        if (status === "completed" && onSuccess) {
+        if (onSuccess) {
           onSuccess();
         }
+        isExecutingRef.current = false;
       }
     }
-  }, [batchStatus, currentStep, onSuccess]);
+  }, [batchStatus, currentStep, currentNodeIndex, currentBatchId, nodeIds, nodeNames, executionResults, executeNextNode, onSuccess, queryClient]);
 
   // 重置状态
   const resetState = useCallback(() => {
     setCurrentStep(0);
     setIncludeDescendants(true);
     setPreviewData(null);
-    setBatchId(null);
+    setCurrentNodeIndex(0);
+    setCurrentBatchId(null);
+    setExecutionResults([]);
+    isExecutingRef.current = false;
   }, []);
 
   // 关闭时重置
@@ -137,35 +232,62 @@ export function BatchSyncModal({
   const handlePreview = useCallback(async () => {
     setPreviewLoading(true);
     try {
-      const result = await previewBatchSync(nodeId, {
-        include_descendants: includeDescendants,
-      });
-      setPreviewData(result);
+      // 对所有节点分别预览并合并结果
+      const results = await Promise.all(
+        nodeIds.map(nodeId => previewBatchSync(nodeId, {
+          include_descendants: includeDescendants,
+        }))
+      );
+
+      // 合并预览结果
+      const mergedDocuments: DocumentPreviewItem[] = [];
+      let totalDocuments = 0;
+      let canSyncCount = 0;
+      let willSkipCount = 0;
+
+      for (const result of results) {
+        mergedDocuments.push(...result.documents);
+        totalDocuments += result.total_documents;
+        canSyncCount += result.can_sync;
+        willSkipCount += result.will_skip;
+      }
+
+      const mergedResult: BatchSyncPreviewResponse = {
+        root_node_id: nodeIds[0],
+        total_documents: totalDocuments,
+        can_sync: canSyncCount,
+        will_skip: willSkipCount,
+        documents: mergedDocuments,
+      };
+
+      setPreviewData(mergedResult);
       setCurrentStep(1);
     } catch (error) {
       message.error(`预览失败: ${(error as Error).message}`);
     } finally {
       setPreviewLoading(false);
     }
-  }, [nodeId, includeDescendants]);
+  }, [nodeIds, includeDescendants]);
 
-  // 执行
+  // 开始执行（串行）
   const handleExecute = useCallback(async () => {
-    setExecuteLoading(true);
-    try {
-      const result = await executeBatchSync(nodeId, {
-        include_descendants: includeDescendants,
-        concurrency: 3,
-      });
-      setBatchId(result.batch_id);
-      setCurrentStep(2);
-      message.success("批量同步已启动");
-    } catch (error) {
-      message.error(`执行失败: ${(error as Error).message}`);
-    } finally {
-      setExecuteLoading(false);
+    if (isExecutingRef.current) {
+      return;
     }
-  }, [nodeId, includeDescendants]);
+
+    setExecuteLoading(true);
+    isExecutingRef.current = true;
+
+    // 进入执行步骤
+    setCurrentStep(2);
+    setCurrentNodeIndex(0);
+    setExecutionResults([]);
+
+    // 开始执行第一个节点
+    executeNextNode(0, []);
+
+    setExecuteLoading(false);
+  }, [executeNextNode]);
 
   // 预览表格列
   const previewColumns = [
@@ -281,10 +403,13 @@ export function BatchSyncModal({
   const renderConfigStep = () => (
     <Space direction="vertical" style={{ width: "100%" }} size="large">
       <div>
-        <Text strong>目标节点</Text>
+        <Text strong>目标节点 ({nodeCount} 个)</Text>
         <Paragraph>
-          <Tag color="blue">{nodeName}</Tag>
-          <Text type="secondary">(ID: {nodeId})</Text>
+          {nodeNames.map((name, index) => (
+            <Tag key={nodeIds[index]} color="blue" style={{ marginBottom: 4 }}>
+              {name}
+            </Tag>
+          ))}
         </Paragraph>
       </div>
 
@@ -292,7 +417,7 @@ export function BatchSyncModal({
         type="info"
         showIcon
         message="同步说明"
-        description="批量同步将把节点下所有配置了 sync_target 的文档同步到外部 MySQL 数据库。"
+        description="批量同步将把节点下所有配置了 sync_target 的文档同步到外部 MySQL 数据库。源文档（工作流输入）将被自动排除。"
       />
 
       <div>
@@ -345,11 +470,17 @@ export function BatchSyncModal({
 
   // 渲染执行步骤
   const renderExecuteStep = () => {
+    const currentNodeName = nodeNames[currentNodeIndex] || "";
+    const completedNodes = executionResults.length;
+
+    // 如果当前批次还没有状态，显示启动中
     if (!batchStatus) {
       return (
         <div style={{ textAlign: "center", padding: 48 }}>
           <Spin size="large" />
-          <Paragraph style={{ marginTop: 16 }}>正在启动批量同步...</Paragraph>
+          <Paragraph style={{ marginTop: 16 }}>
+            正在启动节点 {currentNodeIndex + 1}/{nodeCount}：{currentNodeName}
+          </Paragraph>
         </div>
       );
     }
@@ -359,6 +490,26 @@ export function BatchSyncModal({
 
     return (
       <Space direction="vertical" style={{ width: "100%" }} size="large">
+        {/* 总体进度 */}
+        {nodeCount > 1 && (
+          <Alert
+            type="info"
+            showIcon
+            message={
+              <Space>
+                <span>
+                  正在处理节点 <strong>{currentNodeIndex + 1}/{nodeCount}</strong>：
+                </span>
+                <Tag color="blue">{currentNodeName}</Tag>
+                {completedNodes > 0 && (
+                  <Text type="secondary">（已完成 {completedNodes} 个节点）</Text>
+                )}
+              </Space>
+            }
+          />
+        )}
+
+        {/* 当前批次进度 */}
         <div style={{ textAlign: "center" }}>
           <Progress
             type="circle"
@@ -395,37 +546,87 @@ export function BatchSyncModal({
 
   // 渲染完成步骤
   const renderCompleteStep = () => {
-    if (!batchStatus) {
-      return <Spin />;
+    // 汇总所有节点的执行结果
+    let totalSuccess = 0;
+    let totalFailed = 0;
+    let totalSkipped = 0;
+    const allDocResults: Array<Record<string, unknown>> = [];
+
+    for (const result of executionResults) {
+      totalSuccess += result.status.success_count;
+      totalFailed += result.status.failed_count;
+      totalSkipped += result.status.skipped_count;
+
+      // 收集详细结果
+      const docResults = result.status.details?.document_results || [];
+      allDocResults.push(...(docResults as Array<Record<string, unknown>>));
     }
 
-    const { status, success_count, failed_count, skipped_count, details } = batchStatus;
-    const isSuccess = status === "completed" && failed_count === 0;
-    const docResults = details?.document_results || [];
+    const allSuccess = totalFailed === 0;
 
     return (
       <Space direction="vertical" style={{ width: "100%" }} size="middle">
         <Result
-          status={isSuccess ? "success" : failed_count > 0 ? "warning" : "info"}
-          title={isSuccess ? "批量同步执行完成" : "批量同步执行完成（部分失败）"}
+          status={allSuccess ? "success" : totalFailed > 0 ? "warning" : "info"}
+          title={allSuccess ? "批量同步执行完成" : "批量同步执行完成（部分失败）"}
           subTitle={
-            <Space split={<span style={{ color: "#d9d9d9" }}>|</span>}>
-              <span>
-                成功：<Text type="success">{success_count}</Text>
-              </span>
-              <span>
-                失败：<Text type="danger">{failed_count}</Text>
-              </span>
-              <span>
-                跳过：<Text type="warning">{skipped_count}</Text>
-              </span>
+            <Space direction="vertical" size="small">
+              {nodeCount > 1 && <Text>共处理 {nodeCount} 个根节点</Text>}
+              <Space split={<span style={{ color: "#d9d9d9" }}>|</span>}>
+                <span>
+                  成功：<Text type="success">{totalSuccess}</Text>
+                </span>
+                <span>
+                  失败：<Text type="danger">{totalFailed}</Text>
+                </span>
+                <span>
+                  跳过：<Text type="warning">{totalSkipped}</Text>
+                </span>
+              </Space>
             </Space>
           }
         />
 
-        {docResults.length > 0 && (
+        {/* 每个根节点的执行摘要 */}
+        {executionResults.length > 1 && (
+          <div>
+            <Text strong style={{ marginBottom: 8, display: "block" }}>各节点执行情况：</Text>
+            <Space direction="vertical" style={{ width: "100%" }} size="small">
+              {executionResults.map((result, index) => (
+                <div
+                  key={result.nodeId}
+                  style={{
+                    padding: 8,
+                    border: "1px solid #f0f0f0",
+                    borderRadius: 4,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <Space>
+                    <Text>{index + 1}.</Text>
+                    <Text strong>{result.nodeName}</Text>
+                  </Space>
+                  <Space size="small">
+                    <Tag color="success">{result.status.success_count} 成功</Tag>
+                    {result.status.failed_count > 0 && (
+                      <Tag color="error">{result.status.failed_count} 失败</Tag>
+                    )}
+                    {result.status.skipped_count > 0 && (
+                      <Tag color="warning">{result.status.skipped_count} 跳过</Tag>
+                    )}
+                  </Space>
+                </div>
+              ))}
+            </Space>
+          </div>
+        )}
+
+        {/* 详细结果表格 */}
+        {allDocResults.length > 0 && (
           <Table
-            dataSource={docResults}
+            dataSource={allDocResults}
             columns={resultColumns}
             rowKey="document_id"
             size="small"
@@ -455,7 +656,7 @@ export function BatchSyncModal({
 
   // 渲染底部按钮
   const renderFooter = () => {
-    const buttons: React.ReactNode[] = [];
+    const buttons: ReactNode[] = [];
 
     // 关闭按钮
     if (currentStep === 3) {
