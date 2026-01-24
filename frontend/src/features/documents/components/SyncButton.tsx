@@ -1,4 +1,4 @@
-import { type FC, useState, useEffect } from "react";
+import { type FC, useState, useEffect, useRef } from "react";
 import {
   Button,
   Tooltip,
@@ -49,6 +49,8 @@ const statusLabels: Record<string, string> = {
 export const SyncButton: FC<SyncButtonProps> = ({ documentId, disabled }) => {
   const queryClient = useQueryClient();
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const pollCountRef = useRef(0);
+  const maxPollCount = 30; // 最多轮询 30 次（60 秒）
 
   const {
     data: syncStatus,
@@ -61,8 +63,15 @@ export const SyncButton: FC<SyncButtonProps> = ({ documentId, disabled }) => {
     refetchInterval: (query) => {
       const status = query.state.data;
       if (status?.last_sync?.status === "pending") {
+        pollCountRef.current += 1;
+        // 超过最大轮询次数后停止轮询
+        if (pollCountRef.current >= maxPollCount) {
+          return false;
+        }
         return 2000;
       }
+      // 状态不是 pending 时重置计数器
+      pollCountRef.current = 0;
       return false;
     },
   });

@@ -390,6 +390,19 @@ func (s *SyncService) GetSyncStatus(ctx context.Context, meta RequestMeta, docID
 
 	var lastSync *LastSync
 	if err == nil {
+		// 检查是否超时：如果状态是 pending 且超过 SyncPendingTimeout，自动标记为失败
+		if syncStatus.LastStatus == SyncStatusPending && time.Since(syncStatus.UpdatedAt) > SyncPendingTimeout {
+			// 自动清理超时的 pending 任务
+			now := time.Now()
+			s.db.WithContext(ctx).Model(&syncStatus).Updates(map[string]interface{}{
+				"last_status": SyncStatusFailed,
+				"last_error":  "同步任务超时",
+				"updated_at":  now,
+			})
+			syncStatus.LastStatus = SyncStatusFailed
+			syncStatus.LastError = "同步任务超时"
+		}
+
 		lastSync = &LastSync{
 			EventID:  syncStatus.LastEventID,
 			Version:  syncStatus.LastVersion,
