@@ -156,7 +156,7 @@ func (s *BatchSyncService) PreviewBatchSync(
 	}, nil
 }
 
-// collectDocuments 递归收集节点下的所有文档
+// collectDocuments 递归收集节点下的所有文档（排除源文档）
 func (s *BatchSyncService) collectDocuments(
 	ctx context.Context,
 	meta RequestMeta,
@@ -171,6 +171,18 @@ func (s *BatchSyncService) collectDocuments(
 		return nil, fmt.Errorf("get node %d: %w", nodeID, err)
 	}
 
+	// 获取当前节点的源文档 ID 列表（用于排除）
+	sourceDocIDs := make(map[int64]bool)
+	sourceDocs, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), nodeID)
+	if err != nil {
+		// 源文档获取失败不阻塞流程，仅记录日志
+		log.Printf("[batch_sync] warning: failed to get source documents for node %d: %v", nodeID, err)
+	} else {
+		for _, sd := range sourceDocs {
+			sourceDocIDs[sd.DocumentID] = true
+		}
+	}
+
 	// 获取当前节点的文档
 	docs, err := s.getNodeDocuments(ctx, meta, nodeID)
 	if err != nil {
@@ -178,6 +190,10 @@ func (s *BatchSyncService) collectDocuments(
 	}
 
 	for _, doc := range docs {
+		// 排除源文档（工作流输入）
+		if sourceDocIDs[doc.ID] {
+			continue
+		}
 		result = append(result, documentWithNode{
 			Document: doc,
 			NodeID:   nodeID,
