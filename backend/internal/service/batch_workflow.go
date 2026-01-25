@@ -23,8 +23,10 @@ const (
 	// DefaultBatchConcurrency 默认批量执行并发数
 	// 设为 1 避免 Prefect Server (SQLite) 并发写入导致 503
 	DefaultBatchConcurrency = 1
+	// DefaultSyncConcurrency sync_to_mysql 默认并发数（不调用 Prefect，可以更高）
+	DefaultSyncConcurrency = 10
 	// MaxBatchConcurrency 最大批量执行并发数
-	MaxBatchConcurrency = 10
+	MaxBatchConcurrency = 20
 )
 
 // BatchWorkflowService 批量工作流服务
@@ -384,7 +386,12 @@ func (s *BatchWorkflowService) executeBatchAsync(
 	// 设置并发数
 	concurrency := req.Concurrency
 	if concurrency <= 0 {
-		concurrency = DefaultBatchConcurrency
+		// sync_to_mysql 不调用 Prefect，可以使用更高的默认并发数
+		if req.WorkflowKey == SyncWorkflowKey {
+			concurrency = DefaultSyncConcurrency
+		} else {
+			concurrency = DefaultBatchConcurrency
+		}
 	}
 	if concurrency > MaxBatchConcurrency {
 		concurrency = MaxBatchConcurrency
