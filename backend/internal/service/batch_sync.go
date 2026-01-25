@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"slices"
 	"sync"
 	"time"
 
@@ -34,7 +35,8 @@ func NewBatchSyncService(db *gorm.DB, ndr ndrclient.Client, syncSvc *SyncService
 
 // BatchSyncPreviewRequest 批量同步预览请求
 type BatchSyncPreviewRequest struct {
-	IncludeDescendants bool `json:"include_descendants"`
+	IncludeDescendants bool     `json:"include_descendants"`
+	SkipDocTypes       []string `json:"skip_doc_types"` // 跳过指定类型的文档
 }
 
 // DocumentPreviewItem 文档预览项
@@ -60,8 +62,9 @@ type BatchSyncPreviewResponse struct {
 
 // BatchSyncExecuteRequest 批量同步执行请求
 type BatchSyncExecuteRequest struct {
-	IncludeDescendants bool `json:"include_descendants"`
-	Concurrency        int  `json:"concurrency,omitempty"` // 并发数，默认 3
+	IncludeDescendants bool     `json:"include_descendants"`
+	Concurrency        int      `json:"concurrency,omitempty"` // 并发数，默认 3
+	SkipDocTypes       []string `json:"skip_doc_types"`        // 跳过指定类型的文档
 }
 
 // BatchSyncExecuteResponse 批量同步执行响应
@@ -104,7 +107,7 @@ func (s *BatchSyncService) PreviewBatchSync(
 	req BatchSyncPreviewRequest,
 ) (*BatchSyncPreviewResponse, error) {
 	// 收集所有目标文档
-	documents, err := s.collectDocuments(ctx, meta, nodeID, req.IncludeDescendants)
+	documents, err := s.collectDocuments(ctx, meta, nodeID, req.IncludeDescendants, req.SkipDocTypes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect documents: %w", err)
 	}
@@ -162,6 +165,7 @@ func (s *BatchSyncService) collectDocuments(
 	meta RequestMeta,
 	nodeID int64,
 	includeDescendants bool,
+	skipDocTypes []string,
 ) ([]documentWithNode, error) {
 	result := make([]documentWithNode, 0)
 
@@ -194,6 +198,16 @@ func (s *BatchSyncService) collectDocuments(
 		if sourceDocIDs[doc.ID] {
 			continue
 		}
+		// 跳过指定类型的文档
+		if len(skipDocTypes) > 0 {
+			docType := ""
+			if doc.Type != nil {
+				docType = *doc.Type
+			}
+			if slices.Contains(skipDocTypes, docType) {
+				continue
+			}
+		}
 		result = append(result, documentWithNode{
 			Document: doc,
 			NodeID:   nodeID,
@@ -215,7 +229,7 @@ func (s *BatchSyncService) collectDocuments(
 		if child.DeletedAt != nil {
 			continue // 跳过已删除的节点
 		}
-		childDocs, err := s.collectDocuments(ctx, meta, child.ID, true)
+		childDocs, err := s.collectDocuments(ctx, meta, child.ID, true, skipDocTypes)
 		if err != nil {
 			return nil, err
 		}
@@ -264,7 +278,7 @@ func (s *BatchSyncService) ExecuteBatchSync(
 	req BatchSyncExecuteRequest,
 ) (*BatchSyncExecuteResponse, error) {
 	// 收集所有目标文档
-	documents, err := s.collectDocuments(ctx, meta, nodeID, req.IncludeDescendants)
+	documents, err := s.collectDocuments(ctx, meta, nodeID, req.IncludeDescendants, req.SkipDocTypes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect documents: %w", err)
 	}

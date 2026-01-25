@@ -153,6 +153,17 @@ func (h *WorkflowHandler) listNodeWorkflows(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	// 添加 sync_to_mysql 作为特殊工作流选项
+	syncWorkflow := service.WorkflowDefinitionInfo{
+		WorkflowKey: "sync_to_mysql",
+		Name:        "同步到 MySQL",
+		Description: "将文档同步到外部 MySQL 数据库",
+		Enabled:     true,
+	}
+	// 将 sync_to_mysql 添加到列表末尾
+	definitions = append(definitions, syncWorkflow)
+
 	writeJSON(w, http.StatusOK, definitions)
 }
 

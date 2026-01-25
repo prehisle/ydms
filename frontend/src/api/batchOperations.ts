@@ -20,6 +20,7 @@ export interface BatchWorkflowPreviewRequest {
   skip_no_source?: boolean;
   skip_no_output?: boolean;
   skip_name_contains?: string;
+  skip_doc_types?: string[];
 }
 
 // 批量工作流预览响应
@@ -40,6 +41,7 @@ export interface BatchWorkflowExecuteRequest {
   skip_no_source?: boolean;
   skip_no_output?: boolean;
   skip_name_contains?: string;
+  skip_doc_types?: string[];
   parameters?: Record<string, unknown>;
   concurrency?: number;
 }
@@ -167,6 +169,7 @@ export interface DocumentPreviewItem {
 // 批量同步预览请求
 export interface BatchSyncPreviewRequest {
   include_descendants: boolean;
+  skip_doc_types?: string[];
 }
 
 // 批量同步预览响应
@@ -182,6 +185,7 @@ export interface BatchSyncPreviewResponse {
 export interface BatchSyncExecuteRequest {
   include_descendants: boolean;
   concurrency?: number;
+  skip_doc_types?: string[];
 }
 
 // 批量同步执行响应

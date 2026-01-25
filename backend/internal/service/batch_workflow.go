@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,11 +45,12 @@ func NewBatchWorkflowService(db *gorm.DB, ndr ndrclient.Client, workflowSvc *Wor
 
 // BatchWorkflowPreviewRequest 批量工作流预览请求
 type BatchWorkflowPreviewRequest struct {
-	WorkflowKey        string `json:"workflow_key"`
-	IncludeDescendants bool   `json:"include_descendants"`
-	SkipNoSource       bool   `json:"skip_no_source"`       // 跳过没有源文档的节点
-	SkipNoOutput       bool   `json:"skip_no_output"`       // 跳过无产出文档的节点
-	SkipNameContains   string `json:"skip_name_contains"`   // 跳过节点名包含指定字符串的节点
+	WorkflowKey        string   `json:"workflow_key"`
+	IncludeDescendants bool     `json:"include_descendants"`
+	SkipNoSource       bool     `json:"skip_no_source"`       // 跳过没有源文档的节点
+	SkipNoOutput       bool     `json:"skip_no_output"`       // 跳过无产出文档的节点
+	SkipNameContains   string   `json:"skip_name_contains"`   // 跳过节点名包含指定字符串的节点
+	SkipDocTypes       []string `json:"skip_doc_types"`       // 跳过指定类型的源文档
 }
 
 // NodePreviewItem 节点预览项
@@ -80,6 +82,7 @@ type BatchWorkflowExecuteRequest struct {
 	SkipNoSource       bool                   `json:"skip_no_source"`
 	SkipNoOutput       bool                   `json:"skip_no_output"`       // 跳过无产出文档的节点
 	SkipNameContains   string                 `json:"skip_name_contains"`   // 跳过节点名包含指定字符串的节点
+	SkipDocTypes       []string               `json:"skip_doc_types"`       // 跳过指定类型的源文档
 	Parameters         map[string]interface{} `json:"parameters,omitempty"`
 	Concurrency        int                    `json:"concurrency,omitempty"` // 并发数，默认 3
 }
@@ -160,6 +163,22 @@ func (s *BatchWorkflowService) PreviewBatchWorkflow(
 			previewItems = append(previewItems, item)
 			continue
 		}
+
+		// 过滤掉指定类型的源文档
+		if len(req.SkipDocTypes) > 0 {
+			filteredSources := make([]ndrclient.SourceDocument, 0, len(sources))
+			for _, src := range sources {
+				docType := ""
+				if src.Document != nil && src.Document.Type != nil {
+					docType = *src.Document.Type
+				}
+				if !slices.Contains(req.SkipDocTypes, docType) {
+					filteredSources = append(filteredSources, src)
+				}
+			}
+			sources = filteredSources
+		}
+
 		item.SourceDocCount = len(sources)
 
 		if len(sources) == 0 && req.SkipNoSource {
@@ -410,7 +429,7 @@ func (s *BatchWorkflowService) executeBatchAsync(
 			// 检查是否需要跳过无源文档的节点
 			// SkipNoOutput 也需要源文档集合用于"产出文档"判断，因此这里统一预取源文档
 			var sourceDocIDs []int64
-			if req.SkipNoSource || req.SkipNoOutput {
+			if req.SkipNoSource || req.SkipNoOutput || len(req.SkipDocTypes) > 0 {
 				sources, err := s.ndr.ListSourceDocuments(ctx, toNDRMeta(meta), n.ID)
 				if err != nil {
 					mu.Lock()
@@ -421,6 +440,22 @@ func (s *BatchWorkflowService) executeBatchAsync(
 					mu.Unlock()
 					return
 				}
+
+				// 过滤掉指定类型的源文档
+				if len(req.SkipDocTypes) > 0 {
+					filteredSources := make([]ndrclient.SourceDocument, 0, len(sources))
+					for _, src := range sources {
+						docType := ""
+						if src.Document != nil && src.Document.Type != nil {
+							docType = *src.Document.Type
+						}
+						if !slices.Contains(req.SkipDocTypes, docType) {
+							filteredSources = append(filteredSources, src)
+						}
+					}
+					sources = filteredSources
+				}
+
 				if req.SkipNoSource && len(sources) == 0 {
 					mu.Lock()
 					skippedCount++
