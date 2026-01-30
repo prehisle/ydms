@@ -461,8 +461,9 @@ export const SystemWorkflowRunsPage: FC = () => {
       width: 150,
       fixed: "right" as const,
       render: (_, run) => {
+        // 允许重新执行：成功、失败、已取消的任务都可以重试
         const canRetry =
-          run.status === "failed" || run.status === "cancelled";
+          run.status === "success" || run.status === "failed" || run.status === "cancelled";
         const canCancel =
           run.status === "pending" || run.status === "running";
         const canForceTerminate = isZombieTask(run);
