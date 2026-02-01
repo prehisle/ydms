@@ -125,6 +125,25 @@ export interface CategoryTreePanelProps {
   onScrollToNodeComplete?: () => void;
 }
 
+// 兼容性剪贴板复制（支持非 HTTPS 环境）
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  // Fallback: 使用临时 textarea
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
 export function CategoryTreePanel({
   categories,
   lookups,
@@ -823,7 +842,7 @@ export function CategoryTreePanel({
         label: "复制节点路径",
         onClick: () => {
           closeContextMenu("action:copy-path");
-          navigator.clipboard.writeText(targetNode.path).then(
+          copyToClipboard(targetNode.path).then(
             () => messageApi.success(`已复制路径: ${targetNode.path}`),
             () => messageApi.error("复制失败")
           );
@@ -839,7 +858,7 @@ export function CategoryTreePanel({
         label: "复制节点ID",
         onClick: () => {
           closeContextMenu("action:copy-id");
-          navigator.clipboard.writeText(String(targetNode.id)).then(
+          copyToClipboard(String(targetNode.id)).then(
             () => messageApi.success(`已复制ID: ${targetNode.id}`),
             () => messageApi.error("复制失败")
           );
