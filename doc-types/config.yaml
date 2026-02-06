@@ -53,3 +53,9 @@ types:
           label: "竹林墨韵"
           description: "墨绿色调，适合国风内容"
           path: "themes/forest.css"
+  - id: xiaohongshu_cards_v1
+    label: "小红书卡片(v1)"
+    content_format: "html"
+    template: "template.html"
+    frontend:
+      hook_import: "../features/documents/typePlugins/xiaohongshu_cards_v1/register"

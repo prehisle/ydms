@@ -865,6 +865,25 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 			},
 			Enabled: false, // 已由 generate_node_documents 替代
 		},
+		{
+			WorkflowKey:           "generate_xiaohongshu_cards",
+			Name:                  "生成小红书卡片",
+			Description:           "将知识内容转化为适合小红书传播的系列卡片（深色 Bento Grid 风格，3:4 比例）",
+			PrefectDeploymentName: "node-generate-xiaohongshu-cards-deployment",
+			ParameterSchema: database.JSONMap{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"course_name": map[string]interface{}{
+						"type":        "string",
+						"title":       "课程名称",
+						"description": "显示在卡片上的课程名称",
+						"default":     "系统架构设计",
+					},
+				},
+				"required": []string{"course_name"},
+			},
+			Enabled: true,
+		},
 	}
 
 	for _, def := range defaults {

@@ -45,6 +45,12 @@ export const DOCUMENT_TYPE_DEFINITIONS = [
     contentFormat: "html",
     templatePath: "../../../doc-types/knowledge_overview_v1/template.html",
   },
+  {
+    id: "xiaohongshu_cards_v1",
+    label: "小红书卡片(v1)",
+    contentFormat: "html",
+    templatePath: "../../../doc-types/xiaohongshu_cards_v1/template.html",
+  },
 ] as const satisfies readonly DocumentTypeDefinition[];
 
 export const DOCUMENT_TYPES = {
@@ -54,6 +60,7 @@ export const DOCUMENT_TYPES = {
   ESSAY_V1: "essay_v1",
   DICTATION_V1: "dictation_v1",
   KNOWLEDGE_OVERVIEW_V1: "knowledge_overview_v1",
+  XIAOHONGSHU_CARDS_V1: "xiaohongshu_cards_v1",
 } as const;
 
 export type DocumentType = typeof DOCUMENT_TYPES[keyof typeof DOCUMENT_TYPES];
@@ -83,6 +90,10 @@ export const DOCUMENT_TYPE_OPTIONS = [
     value: "knowledge_overview_v1",
     label: "知识点概览(v1)",
   },
+  {
+    value: "xiaohongshu_cards_v1",
+    label: "小红书卡片(v1)",
+  },
 ] as const;
 
 export const DOCUMENT_TYPE_MAP = {
@@ -92,4 +103,5 @@ export const DOCUMENT_TYPE_MAP = {
   essay_v1: DOCUMENT_TYPE_DEFINITIONS[3],
   dictation_v1: DOCUMENT_TYPE_DEFINITIONS[4],
   knowledge_overview_v1: DOCUMENT_TYPE_DEFINITIONS[5],
+  xiaohongshu_cards_v1: DOCUMENT_TYPE_DEFINITIONS[6],
 } as const;
