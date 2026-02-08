@@ -45,6 +45,12 @@ func init() {
 			ContentFormat: ContentFormatHTML,
 			TemplatePath: "../../../doc-types/xiaohongshu_cards_v1/template.html",
 		},
+		DocumentType("xiaohongshu_card_images_v1"): {
+			ID: DocumentType("xiaohongshu_card_images_v1"),
+			Label: "小红书卡片图片(v1)",
+			ContentFormat: ContentFormatJSON,
+			TemplatePath: "../../../doc-types/xiaohongshu_card_images_v1/template.json",
+		},
 	}
 	documentTypeOrder = []DocumentType{
 		DocumentType("markdown_v1"),
@@ -54,5 +60,6 @@ func init() {
 		DocumentType("dictation_v1"),
 		DocumentType("knowledge_overview_v1"),
 		DocumentType("xiaohongshu_cards_v1"),
+		DocumentType("xiaohongshu_card_images_v1"),
 	}
 }

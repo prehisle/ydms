@@ -347,6 +347,8 @@ func contentFormatConst(format string) (string, error) {
 		return "ContentFormatYAML", nil
 	case "markdown":
 		return "ContentFormatMarkdown", nil
+	case "json":
+		return "ContentFormatJSON", nil
 	default:
 		return "", fmt.Errorf("unsupported content format %q", format)
 	}

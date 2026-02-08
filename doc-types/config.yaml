@@ -59,3 +59,9 @@ types:
     template: "template.html"
     frontend:
       hook_import: "../features/documents/typePlugins/xiaohongshu_cards_v1/register"
+  - id: xiaohongshu_card_images_v1
+    label: "小红书卡片图片(v1)"
+    content_format: "json"
+    template: "template.json"
+    frontend:
+      hook_import: "../features/documents/typePlugins/xiaohongshu_card_images_v1/register"

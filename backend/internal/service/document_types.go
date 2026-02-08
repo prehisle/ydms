@@ -17,6 +17,7 @@ const (
 	ContentFormatHTML     ContentFormat = "html"
 	ContentFormatYAML     ContentFormat = "yaml"
 	ContentFormatMarkdown ContentFormat = "markdown"
+	ContentFormatJSON     ContentFormat = "json"
 )
 
 // DocumentContent represents the structured content of a document.
