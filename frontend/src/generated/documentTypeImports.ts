@@ -7,7 +7,6 @@ import "../features/documents/typePlugins/dictation_v1/register";
 import "../features/documents/typePlugins/essay_v1/register";
 import "../features/documents/typePlugins/knowledge_overview_v1/register";
 import "../features/documents/typePlugins/markdown_v1/register";
-import "../features/documents/typePlugins/xiaohongshu_card_images_v1/register";
 import "../features/documents/typePlugins/xiaohongshu_cards_v1/register";
 
 export const DOCUMENT_TYPE_HOOKS_IMPORTED = true;

@@ -51,12 +51,6 @@ export const DOCUMENT_TYPE_DEFINITIONS = [
     contentFormat: "html",
     templatePath: "../../../doc-types/xiaohongshu_cards_v1/template.html",
   },
-  {
-    id: "xiaohongshu_card_images_v1",
-    label: "小红书卡片图片(v1)",
-    contentFormat: "json",
-    templatePath: "../../../doc-types/xiaohongshu_card_images_v1/template.json",
-  },
 ] as const satisfies readonly DocumentTypeDefinition[];
 
 export const DOCUMENT_TYPES = {
@@ -67,7 +61,6 @@ export const DOCUMENT_TYPES = {
   DICTATION_V1: "dictation_v1",
   KNOWLEDGE_OVERVIEW_V1: "knowledge_overview_v1",
   XIAOHONGSHU_CARDS_V1: "xiaohongshu_cards_v1",
-  XIAOHONGSHU_CARD_IMAGES_V1: "xiaohongshu_card_images_v1",
 } as const;
 
 export type DocumentType = typeof DOCUMENT_TYPES[keyof typeof DOCUMENT_TYPES];
@@ -101,10 +94,6 @@ export const DOCUMENT_TYPE_OPTIONS = [
     value: "xiaohongshu_cards_v1",
     label: "小红书卡片(v1)",
   },
-  {
-    value: "xiaohongshu_card_images_v1",
-    label: "小红书卡片图片(v1)",
-  },
 ] as const;
 
 export const DOCUMENT_TYPE_MAP = {
@@ -115,5 +104,4 @@ export const DOCUMENT_TYPE_MAP = {
   dictation_v1: DOCUMENT_TYPE_DEFINITIONS[4],
   knowledge_overview_v1: DOCUMENT_TYPE_DEFINITIONS[5],
   xiaohongshu_cards_v1: DOCUMENT_TYPE_DEFINITIONS[6],
-  xiaohongshu_card_images_v1: DOCUMENT_TYPE_DEFINITIONS[7],
 } as const;
