@@ -884,6 +884,30 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 			},
 			Enabled: true,
 		},
+		{
+			WorkflowKey:           "generate_xiaohongshu_cards_v3",
+			Name:                  "生成小红书卡片 V3",
+			Description:           "小红书卡片生成 V3 版本 - 简洁 prompt，无结构约束，更多创意自由度",
+			PrefectDeploymentName: "node-generate-xiaohongshu-cards-v3-deployment",
+			ParameterSchema: database.JSONMap{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"course_name": map[string]interface{}{
+						"type":        "string",
+						"title":       "课程名称",
+						"description": "显示在卡片上的课程名称",
+						"default":     "系统架构设计",
+					},
+					"series_name": map[string]interface{}{
+						"type":        "string",
+						"title":       "系列名称",
+						"description": "显示在描述开头的系列名称，如：系统架构系列。留空则不添加系列编号前缀",
+						"default":     "",
+					},
+				},
+			},
+			Enabled: true,
+		},
 	}
 
 	for _, def := range defaults {
