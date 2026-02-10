@@ -56,6 +56,7 @@ interface WorkflowConfig {
   skipNameContains: boolean;
   skipNamePattern: string;
   skipDocTypes: string[];
+  customParams: Record<string, unknown>;  // 工作流自定义参数
 }
 
 // 默认选项类型（按工作流分别保存）
@@ -72,6 +73,7 @@ const defaultConfig: WorkflowConfig = {
   skipNameContains: false,
   skipNamePattern: "",
   skipDocTypes: [],
+  customParams: {},
 };
 
 // 从 localStorage 加载默认选项
@@ -184,6 +186,7 @@ export function BatchWorkflowModal({
   const [skipNameContains, setSkipNameContains] = useState(defaultConfig.skipNameContains);
   const [skipNamePattern, setSkipNamePattern] = useState(defaultConfig.skipNamePattern);
   const [skipDocTypes, setSkipDocTypes] = useState<string[]>(defaultConfig.skipDocTypes);
+  const [customParams, setCustomParams] = useState<Record<string, unknown>>(defaultConfig.customParams);
 
   // 判断是否为同步模式
   const isSyncMode = workflowKey === "sync_to_mysql";
@@ -210,6 +213,7 @@ export function BatchWorkflowModal({
       setSkipNameContains(config.skipNameContains);
       setSkipNamePattern(config.skipNamePattern);
       setSkipDocTypes(config.skipDocTypes);
+      setCustomParams(config.customParams || {});
     }
   }, [workflowKey]);
 
@@ -277,6 +281,7 @@ export function BatchWorkflowModal({
           skip_no_output: skipNoOutput,
           skip_name_contains: skipNameContains && skipNamePattern ? skipNamePattern : undefined,
           skip_doc_types: skipDocTypes.length > 0 ? skipDocTypes : undefined,
+          parameters: Object.keys(customParams).length > 0 ? customParams : undefined,
         });
         batchId = result.batch_id;
       }
@@ -308,7 +313,7 @@ export function BatchWorkflowModal({
       };
       executeNextNode(nodeIndex + 1, [...results, failedResult], syncMode);
     }
-  }, [nodeIds, nodeNames, workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePattern, skipDocTypes, onSuccess]);
+  }, [nodeIds, nodeNames, workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePattern, skipDocTypes, customParams, onSuccess]);
 
   // 当前批次完成时，处理下一个节点
   useEffect(() => {
@@ -474,6 +479,7 @@ export function BatchWorkflowModal({
       skipNameContains,
       skipNamePattern,
       skipDocTypes,
+      customParams,
     });
 
     // 进入执行步骤
@@ -485,7 +491,7 @@ export function BatchWorkflowModal({
     executeNextNode(0, [], isSyncMode);
 
     setExecuteLoading(false);
-  }, [workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePattern, skipDocTypes, executeNextNode, isSyncMode]);
+  }, [workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePattern, skipDocTypes, customParams, executeNextNode, isSyncMode]);
 
   // 预览表格列
   const previewColumns = [
@@ -682,6 +688,59 @@ export function BatchWorkflowModal({
           ]}
         />
       </div>
+
+      {/* 工作流自定义参数 */}
+      {(() => {
+        const selectedWorkflow = workflows?.find(w => w.workflow_key === workflowKey);
+        const schema = selectedWorkflow?.parameter_schema as {
+          properties?: Record<string, { type: string; title?: string; description?: string; default?: unknown }>;
+        } | undefined;
+
+        if (!schema?.properties || Object.keys(schema.properties).length === 0) {
+          return null;
+        }
+
+        // 过滤掉 PDMS 标准参数和工作流内部参数，只显示用户需要配置的自定义参数
+        const HIDDEN_PARAMS = [
+          // PDMS 标准参数（由系统自动传递）
+          "run_id", "node_id", "workflow_key", "source_doc_ids",
+          "callback_url", "pdms_base_url", "api_key",
+          // 工作流内部参数（由系统自动处理或有合理默认值）
+          "doc_id", "image_doc_id", "image_paths", "source_doc_id",
+          "skip_screenshot", "skip_publish", "publish_title", "publish_caption",
+          "topic", "target_docs",
+        ];
+        const customProperties = Object.entries(schema.properties).filter(
+          ([key]) => !HIDDEN_PARAMS.includes(key)
+        );
+
+        if (customProperties.length === 0) {
+          return null;
+        }
+
+        return (
+          <div>
+            <Text strong>工作流参数</Text>
+            <div style={{ marginTop: 8 }}>
+              {customProperties.map(([key, prop]) => (
+                <div key={key} style={{ marginBottom: 12 }}>
+                  <Text style={{ display: "block", marginBottom: 4 }}>{prop.title || key}</Text>
+                  <Input
+                    placeholder={prop.description || `请输入${prop.title || key}`}
+                    value={(customParams[key] as string) ?? (prop.default as string) ?? ""}
+                    onChange={(e) => setCustomParams(prev => ({ ...prev, [key]: e.target.value }))}
+                  />
+                  {prop.description && (
+                    <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 2 }}>
+                      {prop.description}
+                    </Text>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
     </Space>
   );
 
