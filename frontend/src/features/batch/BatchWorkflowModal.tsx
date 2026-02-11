@@ -54,7 +54,7 @@ interface WorkflowConfig {
   skipNoSource: boolean;
   skipNoOutput: boolean;
   skipNameContains: boolean;
-  skipNamePattern: string;
+  skipNamePatterns: string[];
   skipDocTypes: string[];
   customParams: Record<string, unknown>;  // 工作流自定义参数
 }
@@ -71,7 +71,7 @@ const defaultConfig: WorkflowConfig = {
   skipNoSource: true,
   skipNoOutput: true,
   skipNameContains: false,
-  skipNamePattern: "",
+  skipNamePatterns: [],
   skipDocTypes: [],
   customParams: {},
 };
@@ -95,10 +95,19 @@ function loadDefaults(): BatchWorkflowDefaults {
   };
 }
 
-// 获取指定工作流的配置
+// 获取指定工作流的配置（兼容旧格式 skipNamePattern: string → skipNamePatterns: string[]）
 function getWorkflowConfig(workflowKey: string): WorkflowConfig {
   const defaults = loadDefaults();
-  return defaults.configs[workflowKey] || { ...defaultConfig };
+  const raw = defaults.configs[workflowKey];
+  if (!raw) return { ...defaultConfig };
+  // 兼容旧格式
+  if (!raw.skipNamePatterns && (raw as unknown as { skipNamePattern?: string }).skipNamePattern) {
+    raw.skipNamePatterns = [(raw as unknown as { skipNamePattern: string }).skipNamePattern];
+  }
+  if (!raw.skipNamePatterns) {
+    raw.skipNamePatterns = [];
+  }
+  return raw;
 }
 
 // 保存指定工作流的配置
@@ -184,7 +193,7 @@ export function BatchWorkflowModal({
   const [skipNoSource, setSkipNoSource] = useState(defaultConfig.skipNoSource);
   const [skipNoOutput, setSkipNoOutput] = useState(defaultConfig.skipNoOutput);
   const [skipNameContains, setSkipNameContains] = useState(defaultConfig.skipNameContains);
-  const [skipNamePattern, setSkipNamePattern] = useState(defaultConfig.skipNamePattern);
+  const [skipNamePatterns, setSkipNamePatterns] = useState<string[]>(defaultConfig.skipNamePatterns);
   const [skipDocTypes, setSkipDocTypes] = useState<string[]>(defaultConfig.skipDocTypes);
   const [customParams, setCustomParams] = useState<Record<string, unknown>>(defaultConfig.customParams);
 
@@ -211,7 +220,7 @@ export function BatchWorkflowModal({
       setSkipNoSource(config.skipNoSource);
       setSkipNoOutput(config.skipNoOutput);
       setSkipNameContains(config.skipNameContains);
-      setSkipNamePattern(config.skipNamePattern);
+      setSkipNamePatterns(config.skipNamePatterns);
       setSkipDocTypes(config.skipDocTypes);
       setCustomParams(config.customParams || {});
     }
@@ -279,7 +288,7 @@ export function BatchWorkflowModal({
           include_descendants: includeDescendants,
           skip_no_source: skipNoSource,
           skip_no_output: skipNoOutput,
-          skip_name_contains: skipNameContains && skipNamePattern ? skipNamePattern : undefined,
+          skip_name_contains: skipNameContains && skipNamePatterns.length > 0 ? skipNamePatterns.join(",") : undefined,
           skip_doc_types: skipDocTypes.length > 0 ? skipDocTypes : undefined,
           parameters: Object.keys(customParams).length > 0 ? customParams : undefined,
         });
@@ -313,7 +322,7 @@ export function BatchWorkflowModal({
       };
       executeNextNode(nodeIndex + 1, [...results, failedResult], syncMode);
     }
-  }, [nodeIds, nodeNames, workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePattern, skipDocTypes, customParams, onSuccess]);
+  }, [nodeIds, nodeNames, workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePatterns, skipDocTypes, customParams, onSuccess]);
 
   // 当前批次完成时，处理下一个节点
   useEffect(() => {
@@ -419,7 +428,7 @@ export function BatchWorkflowModal({
           include_descendants: includeDescendants,
           skip_no_source: skipNoSource,
           skip_no_output: skipNoOutput,
-          skip_name_contains: skipNameContains && skipNamePattern ? skipNamePattern : undefined,
+          skip_name_contains: skipNameContains && skipNamePatterns.length > 0 ? skipNamePatterns.join(",") : undefined,
           skip_doc_types: skipDocTypes.length > 0 ? skipDocTypes : undefined,
         };
 
@@ -460,7 +469,7 @@ export function BatchWorkflowModal({
     } finally {
       setPreviewLoading(false);
     }
-  }, [nodeIds, workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePattern, skipDocTypes, isSyncMode]);
+  }, [nodeIds, workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePatterns, skipDocTypes, isSyncMode]);
 
   // 开始执行（串行）
   const handleExecute = useCallback(async () => {
@@ -477,7 +486,7 @@ export function BatchWorkflowModal({
       skipNoSource,
       skipNoOutput,
       skipNameContains,
-      skipNamePattern,
+      skipNamePatterns,
       skipDocTypes,
       customParams,
     });
@@ -491,7 +500,7 @@ export function BatchWorkflowModal({
     executeNextNode(0, [], isSyncMode);
 
     setExecuteLoading(false);
-  }, [workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePattern, skipDocTypes, customParams, executeNextNode, isSyncMode]);
+  }, [workflowKey, includeDescendants, skipNoSource, skipNoOutput, skipNameContains, skipNamePatterns, skipDocTypes, customParams, executeNextNode, isSyncMode]);
 
   // 预览表格列
   const previewColumns = [
@@ -655,12 +664,14 @@ export function BatchWorkflowModal({
               />
               <div>
                 <Text>跳过节点名包含</Text>
-                <Input
-                  placeholder="输入要跳过的文本"
-                  value={skipNamePattern}
-                  onChange={(e) => setSkipNamePattern(e.target.value)}
+                <Select
+                  mode="tags"
+                  tokenSeparators={[","]}
+                  placeholder="输入关键词后回车"
+                  value={skipNamePatterns}
+                  onChange={setSkipNamePatterns}
                   disabled={!skipNameContains}
-                  style={{ width: 200, marginLeft: 8 }}
+                  style={{ width: 300, marginLeft: 8 }}
                   size="small"
                 />
               </div>

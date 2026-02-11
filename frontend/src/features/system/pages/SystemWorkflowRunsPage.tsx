@@ -133,7 +133,7 @@ export const SystemWorkflowRunsPage: FC = () => {
   // 获取工作流定义列表（用于筛选下拉）
   const { data: workflows } = useQuery({
     queryKey: ["adminWorkflows"],
-    queryFn: () => listAdminWorkflows(),
+    queryFn: () => listAdminWorkflows({ enabled: true }),
     enabled: isAdmin,
   });
 
@@ -404,7 +404,7 @@ export const SystemWorkflowRunsPage: FC = () => {
       key: "status",
       width: 180,
       render: (status: string, run: WorkflowRun) => {
-        const config = statusConfig[status] || statusConfig.pending;
+        const config = statusConfig[status] || { color: "default", icon: <ClockCircleOutlined />, label: status };
         return (
           <Space size={4} wrap>
             <Tag color={config.color} icon={config.icon}>

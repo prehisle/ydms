@@ -732,6 +732,11 @@ func (s *WorkflowService) HandleCallback(ctx context.Context, runID uint, callba
 		return nil
 	}
 
+	// 规范化 status 值（IDPP 部分工作流发送 "completed" 而非 "success"）
+	if callback.Status == "completed" {
+		callback.Status = "success"
+	}
+
 	updates := map[string]interface{}{
 		"status": callback.Status,
 	}

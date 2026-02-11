@@ -147,13 +147,23 @@ func (s *BatchWorkflowService) PreviewBatchWorkflow(
 			Depth:    node.Depth,
 		}
 
-		// 检查节点名是否包含指定字符串
-		if req.SkipNameContains != "" && strings.Contains(node.Name, req.SkipNameContains) {
-			item.CanExecute = false
-			item.SkipReason = fmt.Sprintf("节点名包含「%s」", req.SkipNameContains)
-			willSkipCount++
-			previewItems = append(previewItems, item)
-			continue
+		// 检查节点名是否包含指定字符串（支持逗号分隔的多个关键词）
+		if req.SkipNameContains != "" {
+			matched := ""
+			for _, p := range strings.Split(req.SkipNameContains, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" && strings.Contains(node.Name, p) {
+					matched = p
+					break
+				}
+			}
+			if matched != "" {
+				item.CanExecute = false
+				item.SkipReason = fmt.Sprintf("节点名包含「%s」", matched)
+				willSkipCount++
+				previewItems = append(previewItems, item)
+				continue
+			}
 		}
 
 		// 检查源文档
@@ -422,15 +432,25 @@ func (s *BatchWorkflowService) executeBatchAsync(
 				"node_path": n.Path,
 			}
 
-			// 检查节点名是否包含指定字符串
-			if req.SkipNameContains != "" && strings.Contains(n.Name, req.SkipNameContains) {
-				mu.Lock()
-				skippedCount++
-				result["status"] = "skipped"
-				result["reason"] = fmt.Sprintf("节点名包含「%s」", req.SkipNameContains)
-				nodeResults = append(nodeResults, result)
-				mu.Unlock()
-				return
+			// 检查节点名是否包含指定字符串（支持逗号分隔的多个关键词）
+			if req.SkipNameContains != "" {
+				matched := ""
+				for _, p := range strings.Split(req.SkipNameContains, ",") {
+					p = strings.TrimSpace(p)
+					if p != "" && strings.Contains(n.Name, p) {
+						matched = p
+						break
+					}
+				}
+				if matched != "" {
+					mu.Lock()
+					skippedCount++
+					result["status"] = "skipped"
+					result["reason"] = fmt.Sprintf("节点名包含「%s」", matched)
+					nodeResults = append(nodeResults, result)
+					mu.Unlock()
+					return
+				}
 			}
 
 			// 检查是否需要跳过无源文档的节点
