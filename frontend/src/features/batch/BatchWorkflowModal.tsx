@@ -15,6 +15,7 @@ import {
   Result,
   Descriptions,
   Input,
+  DatePicker,
   message,
 } from "antd";
 import {
@@ -42,6 +43,7 @@ import {
   type BatchSyncStatusResponse,
 } from "../../api/batchOperations";
 import { listNodeWorkflows } from "../../api/workflows";
+import dayjs from "dayjs";
 
 const { Text, Paragraph } = Typography;
 
@@ -736,11 +738,25 @@ export function BatchWorkflowModal({
               {customProperties.map(([key, prop]) => (
                 <div key={key} style={{ marginBottom: 12 }}>
                   <Text style={{ display: "block", marginBottom: 4 }}>{prop.title || key}</Text>
-                  <Input
-                    placeholder={prop.description || `请输入${prop.title || key}`}
-                    value={(customParams[key] as string) ?? (prop.default as string) ?? ""}
-                    onChange={(e) => setCustomParams(prev => ({ ...prev, [key]: e.target.value }))}
-                  />
+                  {key === "schedule_at" ? (
+                    <DatePicker
+                      showTime
+                      format="YYYY-MM-DD HH:mm"
+                      placeholder="不填则立即发布"
+                      style={{ width: "100%" }}
+                      value={customParams[key] ? dayjs(customParams[key] as string) : null}
+                      onChange={(val) => setCustomParams(prev => ({ ...prev, [key]: val ? val.format("YYYY-MM-DDTHH:mm:ssZ") : "" }))}
+                      disabledDate={(current) =>
+                        current && (current.isBefore(dayjs(), "day") || current.isAfter(dayjs().add(14, "day"), "day"))
+                      }
+                    />
+                  ) : (
+                    <Input
+                      placeholder={prop.description || `请输入${prop.title || key}`}
+                      value={(customParams[key] as string) ?? (prop.default as string) ?? ""}
+                      onChange={(e) => setCustomParams(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  )}
                   {prop.description && (
                     <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 2 }}>
                       {prop.description}

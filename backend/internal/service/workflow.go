@@ -923,8 +923,8 @@ func (s *WorkflowService) EnsureDefaultWorkflows(ctx context.Context) error {
 				return fmt.Errorf("failed to create workflow definition %s: %w", def.WorkflowKey, err)
 			}
 		}
-		// 注意：不再覆盖已存在工作流的 enabled 状态
-		// 用户在管理界面的自定义设置应该被保留
+		// 注意：不再覆盖已存在工作流的 enabled 状态和 parameter_schema
+		// Prefect 同步为唯一数据源，用户通过同步更新
 	}
 
 	return nil
