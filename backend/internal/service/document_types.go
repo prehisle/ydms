@@ -131,6 +131,32 @@ func ValidateDocumentContent(content map[string]any, docType string) error {
 	return nil
 }
 
+// ValidateDocumentContentStructure validates only the basic content structure
+// (format and data fields) without checking document type whitelist.
+func ValidateDocumentContentStructure(content map[string]any) error {
+	if content == nil {
+		return nil
+	}
+
+	formatVal, hasFormat := content["format"]
+	if !hasFormat {
+		return fmt.Errorf("content must have 'format' field")
+	}
+	if _, ok := formatVal.(string); !ok {
+		return fmt.Errorf("content.format must be a string")
+	}
+
+	dataVal, hasData := content["data"]
+	if !hasData {
+		return fmt.Errorf("content must have 'data' field")
+	}
+	if _, ok := dataVal.(string); !ok {
+		return fmt.Errorf("content.data must be a string")
+	}
+
+	return nil
+}
+
 // ValidateDocumentMetadata validates common metadata fields.
 func ValidateDocumentMetadata(metadata map[string]any) error {
 	if metadata == nil {
