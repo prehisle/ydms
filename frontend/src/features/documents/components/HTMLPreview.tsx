@@ -224,7 +224,7 @@ ${content}
       <iframe
         ref={iframeRef}
         srcDoc={fullHTML}
-        sandbox="allow-same-origin"
+        sandbox="allow-same-origin allow-scripts"
         style={{
           width: "100%",
           height: "100%",
