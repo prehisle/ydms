@@ -49,7 +49,7 @@ const XiaohongshuCardsPreview: FC<{ html: string }> = ({ html }) => {
           background: "#0F0F0F",
         }}
         title="小红书卡片预览"
-        sandbox="allow-same-origin"
+        sandbox="allow-same-origin allow-scripts"
       />
     </div>
   );
