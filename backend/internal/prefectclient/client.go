@@ -274,6 +274,38 @@ func (c *Client) ListDeployments(ctx context.Context, tagFilters []string) ([]De
 	return deployments, nil
 }
 
+// CancelFlowRun requests cancellation of a Prefect flow run (best-effort).
+func (c *Client) CancelFlowRun(ctx context.Context, flowRunID string) error {
+	url := fmt.Sprintf("%s/api/flow_runs/%s/set_state", c.baseURL, flowRunID)
+	body := map[string]interface{}{
+		"state": map[string]interface{}{"type": "CANCELLING"},
+	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to cancel flow run: %w", err)
+	}
+	defer resp.Body.Close()
+	// Prefect set_state 返回 200 或 201 均视为成功；404/409 视为已终态（幂等）
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusConflict {
+			log.Printf("[prefect] cancel flow run %s: status %d (treated as already terminal)", flowRunID, resp.StatusCode)
+			return nil
+		}
+		return fmt.Errorf("cancel flow run failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+	return nil
+}
+
 // GetDeployment gets a single deployment by ID.
 func (c *Client) GetDeployment(ctx context.Context, deploymentID string) (*DeploymentDetails, error) {
 	url := fmt.Sprintf("%s/api/deployments/%s", c.baseURL, deploymentID)

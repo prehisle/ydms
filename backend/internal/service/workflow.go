@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
 	"time"
@@ -306,6 +307,7 @@ func (s *WorkflowService) TriggerWorkflow(
 		s.db.Model(&run).Updates(map[string]interface{}{
 			"status":        WorkflowStatusFailed,
 			"error_message": fmt.Sprintf("Deployment not found: %s", err.Error()),
+			"finished_at":   time.Now(),
 		})
 		return nil, fmt.Errorf("failed to find deployment: %w", err)
 	}
@@ -349,23 +351,21 @@ func (s *WorkflowService) TriggerWorkflow(
 		s.db.Model(&run).Updates(map[string]interface{}{
 			"status":        WorkflowStatusFailed,
 			"error_message": fmt.Sprintf("Failed to create flow run: %s", err.Error()),
+			"finished_at":   time.Now(),
 		})
 		return nil, fmt.Errorf("failed to create flow run: %w", err)
 	}
 
-	// 9. Update run record
-	now := time.Now()
+	// 9. Update run record（status 保持 pending，由首次 running 回调驱动）
 	s.db.Model(&run).Updates(map[string]interface{}{
 		"prefect_flow_run_id": flowRun.ID,
-		"status":              WorkflowStatusRunning,
-		"started_at":          &now,
 	})
 
 	return &TriggerWorkflowResponse{
 		RunID:            run.ID,
-		Status:           WorkflowStatusRunning,
+		Status:           WorkflowStatusPending,
 		PrefectFlowRunID: flowRun.ID,
-		Message:          "工作流已提交",
+		Message:          "工作流已提交，等待调度",
 	}, nil
 }
 
@@ -437,6 +437,7 @@ func (s *WorkflowService) TriggerDocumentWorkflow(
 		s.db.Model(&run).Updates(map[string]interface{}{
 			"status":        WorkflowStatusFailed,
 			"error_message": fmt.Sprintf("Deployment not found: %s", err.Error()),
+			"finished_at":   time.Now(),
 		})
 		return nil, fmt.Errorf("failed to find deployment: %w", err)
 	}
@@ -474,23 +475,21 @@ func (s *WorkflowService) TriggerDocumentWorkflow(
 		s.db.Model(&run).Updates(map[string]interface{}{
 			"status":        WorkflowStatusFailed,
 			"error_message": fmt.Sprintf("Failed to create flow run: %s", err.Error()),
+			"finished_at":   time.Now(),
 		})
 		return nil, fmt.Errorf("failed to create flow run: %w", err)
 	}
 
-	// 8. Update run record
-	now := time.Now()
+	// 8. Update run record（status 保持 pending，由首次 running 回调驱动）
 	s.db.Model(&run).Updates(map[string]interface{}{
 		"prefect_flow_run_id": flowRun.ID,
-		"status":              WorkflowStatusRunning,
-		"started_at":          &now,
 	})
 
 	return &TriggerWorkflowResponse{
 		RunID:            run.ID,
-		Status:           WorkflowStatusRunning,
+		Status:           WorkflowStatusPending,
 		PrefectFlowRunID: flowRun.ID,
-		Message:          "工作流已提交",
+		Message:          "工作流已提交，等待调度",
 	}, nil
 }
 
@@ -506,8 +505,35 @@ func (s *WorkflowService) GetWorkflowRun(ctx context.Context, runID uint) (*data
 	return &run, nil
 }
 
+// cancelPrefectFlowRun best-effort 取消 Prefect flow run（失败只 log，不阻塞）
+func (s *WorkflowService) cancelPrefectFlowRun(ctx context.Context, runID uint) {
+	if !s.prefectEnabled {
+		return
+	}
+	var run database.WorkflowRun
+	if err := s.db.Select("prefect_flow_run_id").First(&run, runID).Error; err != nil || run.PrefectFlowRunID == "" {
+		return
+	}
+	if err := s.prefect.CancelFlowRun(ctx, run.PrefectFlowRunID); err != nil {
+		log.Printf("[workflow] best-effort cancel Prefect flow run %s failed: %v", run.PrefectFlowRunID, err)
+	}
+}
+
+// cancelPrefectFlowRunsByQuery 批量取消匹配查询条件的 Prefect flow runs（best-effort）
+func (s *WorkflowService) cancelPrefectFlowRunsByQuery(ctx context.Context, query *gorm.DB) {
+	if !s.prefectEnabled {
+		return
+	}
+	var ids []string
+	query.Where("prefect_flow_run_id != ''").Pluck("prefect_flow_run_id", &ids)
+	for _, id := range ids {
+		if err := s.prefect.CancelFlowRun(ctx, id); err != nil {
+			log.Printf("[workflow] best-effort cancel Prefect flow run %s failed: %v", id, err)
+		}
+	}
+}
+
 // CancelWorkflowRun cancels a workflow run (marks it as cancelled).
-// This only updates the local database status; it does not cancel the Prefect flow run.
 func (s *WorkflowService) CancelWorkflowRun(ctx context.Context, runID uint) error {
 	now := time.Now()
 	updates := map[string]interface{}{
@@ -523,6 +549,8 @@ func (s *WorkflowService) CancelWorkflowRun(ctx context.Context, runID uint) err
 		return res.Error
 	}
 	if res.RowsAffected > 0 {
+		// best-effort 取消 Prefect flow run
+		s.cancelPrefectFlowRun(ctx, runID)
 		return nil
 	}
 
@@ -539,41 +567,39 @@ func (s *WorkflowService) CancelWorkflowRun(ctx context.Context, runID uint) err
 
 // ForceTerminateWorkflowRun 强制终止僵尸任务（运行超过 30 分钟的任务）
 func (s *WorkflowService) ForceTerminateWorkflowRun(ctx context.Context, runID uint) error {
-	// 先获取任务信息
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status":        WorkflowStatusFailed,
+		"error_message": fmt.Sprintf("任务被强制终止（运行时间超过 %v）", ZombieTaskTimeout),
+		"finished_at":   now,
+	}
+
+	// 原子条件更新：状态 + 僵尸超时判断
+	res := s.db.Model(&database.WorkflowRun{}).
+		Where("id = ? AND status IN ?", runID, []string{WorkflowStatusPending, WorkflowStatusRunning}).
+		Where("COALESCE(started_at, created_at) <= ?", now.Add(-ZombieTaskTimeout)).
+		Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		// best-effort 取消 Prefect flow run
+		s.cancelPrefectFlowRun(ctx, runID)
+		return nil
+	}
+
+	// 区分：不存在 vs 状态不允许 vs 未超时
 	var run database.WorkflowRun
-	if err := s.db.First(&run, runID).Error; err != nil {
+	if err := s.db.Select("id, status, started_at, created_at").First(&run, runID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrWorkflowRunNotFound
 		}
 		return err
 	}
-
-	// 检查状态：只能终止 pending 或 running 的任务
 	if run.Status != WorkflowStatusPending && run.Status != WorkflowStatusRunning {
 		return newValidationError("只能终止待执行或运行中的任务（当前状态: %s）", run.Status)
 	}
-
-	// 检查是否为僵尸任务（运行超过 30 分钟）
-	var startTime time.Time
-	if run.StartedAt != nil {
-		startTime = *run.StartedAt
-	} else {
-		startTime = run.CreatedAt
-	}
-
-	if time.Since(startTime) < ZombieTaskTimeout {
-		return newValidationError("任务运行时间未超过 30 分钟，请使用普通取消功能")
-	}
-
-	// 强制终止
-	now := time.Now()
-	updates := map[string]interface{}{
-		"status":        WorkflowStatusFailed,
-		"error_message": fmt.Sprintf("任务被强制终止（运行时间超过 %v）", ZombieTaskTimeout),
-		"finished_at":   &now,
-	}
-
-	return s.db.Model(&run).Updates(updates).Error
+	return newValidationError("任务运行时间未超过 30 分钟，请使用普通取消功能")
 }
 
 // ListWorkflowRunsParams parameters for listing workflow runs.
@@ -720,30 +746,54 @@ type WorkflowCallbackRequest struct {
 	Result       map[string]interface{} `json:"result,omitempty"`
 }
 
-// HandleCallback handles a callback from IDPP workflow.
-func (s *WorkflowService) HandleCallback(ctx context.Context, runID uint, callback WorkflowCallbackRequest) error {
-	var run database.WorkflowRun
-	if err := s.db.First(&run, runID).Error; err != nil {
-		return err
+// normalizeCallbackStatus 归一化回调状态值
+func normalizeCallbackStatus(s string) string {
+	if s == "completed" {
+		return WorkflowStatusSuccess
 	}
+	return s
+}
 
-	// 已取消的任务保持 cancelled，避免回调覆盖导致"取消不生效/状态跳变"
-	if run.Status == WorkflowStatusCancelled {
+// callbackAllowedFrom 返回目标状态允许的来源状态集合
+func callbackAllowedFrom(target string) []string {
+	switch target {
+	case WorkflowStatusRunning:
+		return []string{WorkflowStatusPending, WorkflowStatusRunning}
+	case WorkflowStatusSuccess, WorkflowStatusFailed:
+		return []string{WorkflowStatusPending, WorkflowStatusRunning}
+	default:
 		return nil
 	}
+}
 
-	// 规范化 status 值（IDPP 部分工作流发送 "completed" 而非 "success"）
-	if callback.Status == "completed" {
-		callback.Status = "success"
+// HandleCallback handles a callback from IDPP workflow.
+func (s *WorkflowService) HandleCallback(ctx context.Context, runID uint, callback WorkflowCallbackRequest) error {
+	callback.Status = normalizeCallbackStatus(callback.Status)
+
+	// 白名单 + 获取允许的来源状态
+	allowedFrom := callbackAllowedFrom(callback.Status)
+	if allowedFrom == nil {
+		return nil // 非法状态值，静默忽略
 	}
 
+	now := time.Now()
 	updates := map[string]interface{}{
 		"status": callback.Status,
 	}
 
+	// running 回调：用 COALESCE 保证 started_at 只设一次
+	if callback.Status == WorkflowStatusRunning {
+		updates["started_at"] = gorm.Expr("COALESCE(started_at, ?)", now)
+	}
+
 	if callback.Status == WorkflowStatusSuccess || callback.Status == WorkflowStatusFailed {
-		now := time.Now()
-		updates["finished_at"] = &now
+		updates["finished_at"] = now
+		// started_at 兜底：跳过 running 直接到终态时也要有 started_at
+		updates["started_at"] = gorm.Expr("COALESCE(started_at, ?)", now)
+	}
+
+	if callback.Status == WorkflowStatusSuccess {
+		updates["error_message"] = ""
 	}
 
 	if callback.Status == WorkflowStatusFailed && callback.ErrorMessage != "" {
@@ -754,7 +804,15 @@ func (s *WorkflowService) HandleCallback(ctx context.Context, runID uint, callba
 		updates["result"] = database.JSONMap(callback.Result)
 	}
 
-	return s.db.Model(&run).Updates(updates).Error
+	// 单条条件更新：WHERE status IN allowed_from，无需先读
+	res := s.db.Model(&database.WorkflowRun{}).
+		Where("id = ? AND status IN ?", runID, allowedFrom).
+		Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	// RowsAffected == 0 表示已是终态或不存在，静默忽略
+	return nil
 }
 
 // EnsureDefaultWorkflows ensures default workflow definitions exist in the database.
@@ -975,30 +1033,35 @@ func (s *WorkflowService) CleanupWorkflowRuns(ctx context.Context, params Cleanu
 	var zombieDeleted int64
 	var forceDeleted int64
 
-	// 如果强制清理所有活跃任务
-	if params.ForceCleanupActive && hasActiveStatus {
-		forceQuery := s.db.WithContext(ctx).Model(&database.WorkflowRun{}).
+	// buildActiveQuery 构建活跃任务查询（复用过滤条件）
+	buildActiveQuery := func() *gorm.DB {
+		q := s.db.WithContext(ctx).Model(&database.WorkflowRun{}).
 			Where("status IN ?", []string{WorkflowStatusPending, WorkflowStatusRunning})
-
 		if params.BeforeDate != nil {
-			forceQuery = forceQuery.Where("created_at < ?", *params.BeforeDate)
+			q = q.Where("created_at < ?", *params.BeforeDate)
 		}
 		if params.WorkflowKey != nil {
-			forceQuery = forceQuery.Where("workflow_key = ?", *params.WorkflowKey)
+			q = q.Where("workflow_key = ?", *params.WorkflowKey)
 		}
 		if params.NodeID != nil {
-			forceQuery = forceQuery.Where("node_id = ?", *params.NodeID)
+			q = q.Where("node_id = ?", *params.NodeID)
 		}
 		if params.DocumentID != nil {
-			forceQuery = forceQuery.Where("document_id = ?", *params.DocumentID)
+			q = q.Where("document_id = ?", *params.DocumentID)
 		}
+		return q
+	}
 
+	// 如果强制清理所有活跃任务
+	if params.ForceCleanupActive && hasActiveStatus {
 		if params.DryRun {
-			if err := forceQuery.Count(&forceDeleted).Error; err != nil {
+			if err := buildActiveQuery().Count(&forceDeleted).Error; err != nil {
 				return nil, fmt.Errorf("failed to count active tasks: %w", err)
 			}
 		} else {
-			result := forceQuery.Delete(&database.WorkflowRun{})
+			// 删除前 best-effort 取消 Prefect flow runs
+			s.cancelPrefectFlowRunsByQuery(ctx, buildActiveQuery())
+			result := buildActiveQuery().Delete(&database.WorkflowRun{})
 			if result.Error != nil {
 				return nil, fmt.Errorf("failed to delete active tasks: %w", result.Error)
 			}
@@ -1016,28 +1079,19 @@ func (s *WorkflowService) CleanupWorkflowRuns(ctx context.Context, params Cleanu
 	} else if params.IncludeZombie && hasActiveStatus {
 		// 如果只包含僵尸任务，处理僵尸任务
 		zombieTimeout := time.Now().Add(-ZombieTaskTimeout)
-		zombieQuery := s.db.WithContext(ctx).Model(&database.WorkflowRun{}).
-			Where("status IN ?", []string{WorkflowStatusPending, WorkflowStatusRunning}).
-			Where("COALESCE(started_at, created_at) < ?", zombieTimeout)
-
-		if params.WorkflowKey != nil {
-			zombieQuery = zombieQuery.Where("workflow_key = ?", *params.WorkflowKey)
-		}
-		if params.NodeID != nil {
-			zombieQuery = zombieQuery.Where("node_id = ?", *params.NodeID)
-		}
-		if params.DocumentID != nil {
-			zombieQuery = zombieQuery.Where("document_id = ?", *params.DocumentID)
+		buildZombieQuery := func() *gorm.DB {
+			return buildActiveQuery().Where("COALESCE(started_at, created_at) < ?", zombieTimeout)
 		}
 
 		if params.DryRun {
-			if err := zombieQuery.Count(&zombieDeleted).Error; err != nil {
+			if err := buildZombieQuery().Count(&zombieDeleted).Error; err != nil {
 				return nil, fmt.Errorf("failed to count zombie tasks: %w", err)
 			}
 		} else {
-			// 先将僵尸任务标记为失败
+			// 更新前 best-effort 取消 Prefect flow runs
+			s.cancelPrefectFlowRunsByQuery(ctx, buildZombieQuery())
 			now := time.Now()
-			result := zombieQuery.Updates(map[string]interface{}{
+			result := buildZombieQuery().Updates(map[string]interface{}{
 				"status":        WorkflowStatusFailed,
 				"error_message": fmt.Sprintf("任务被清理（运行时间超过 %v）", ZombieTaskTimeout),
 				"finished_at":   &now,
