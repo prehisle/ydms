@@ -33,7 +33,7 @@ interface DocumentHistoryDrawerProps {
   restoreLoadingVersion?: number | null;
 }
 
-const { Paragraph, Text, Title } = Typography;
+const { Text, Title } = Typography;
 
 const DEFAULT_DOCUMENT_TYPE = DOCUMENT_TYPE_KEYS[0] ?? "overview";
 
@@ -99,6 +99,7 @@ export const DocumentHistoryDrawer: FC<DocumentHistoryDrawerProps> = ({
   restoreLoadingVersion,
 }) => {
   const [selectedVersion, setSelectedVersion] = useState<DocumentVersion | null>(null);
+  const [showVersionList, setShowVersionList] = useState(true);
 
   const versionList = useMemo(() => {
     if (!data) return [] as DocumentVersion[];
@@ -114,10 +115,12 @@ export const DocumentHistoryDrawer: FC<DocumentHistoryDrawerProps> = ({
   useEffect(() => {
     if (!open) {
       setSelectedVersion(null);
+      setShowVersionList(true);
       return;
     }
     if (versionList.length === 0) {
       setSelectedVersion(null);
+      setShowVersionList(true);
       return;
     }
     if (selectedVersion) {
@@ -126,8 +129,9 @@ export const DocumentHistoryDrawer: FC<DocumentHistoryDrawerProps> = ({
         setSelectedVersion(match);
         return;
       }
+      setSelectedVersion(null);
+      setShowVersionList(true);
     }
-    setSelectedVersion(versionList[0]);
   }, [open, versionList, selectedVersion]);
 
   const preview = useMemo(() => extractVersionContent(selectedVersion), [selectedVersion]);
@@ -196,6 +200,18 @@ export const DocumentHistoryDrawer: FC<DocumentHistoryDrawerProps> = ({
           <span>历史版本 - {documentTitle ?? ""}</span>
         </Space>
       }
+      extra={
+        selectedVersion && !showVersionList ? (
+          <Space size={12}>
+            <Tag color="geekblue" style={{ marginRight: 0 }}>
+              当前 v{selectedVersion.version_number}
+            </Tag>
+            <Button size="small" onClick={() => setShowVersionList(true)}>
+              切换版本
+            </Button>
+          </Space>
+        ) : null
+      }
       width="100%"
       open={open}
       onClose={onClose}
@@ -219,12 +235,21 @@ export const DocumentHistoryDrawer: FC<DocumentHistoryDrawerProps> = ({
         />
       ) : null}
 
-      <div style={{ padding: 24, flex: "0 0 auto" }}>
+      <div
+        style={{
+          padding: 24,
+          flex: showVersionList ? 1 : "0 0 auto",
+          display: showVersionList ? "block" : "none",
+          minHeight: 0,
+          overflow: "hidden",
+        }}
+      >
         <Table<DocumentVersion>
           rowKey={(record) => `${record.document_id}-${record.version_number}`}
           columns={columns}
           dataSource={tableData}
           loading={loading}
+          scroll={{ y: "calc(100vh - 260px)" }}
           pagination={{
             current: data?.page ?? 1,
             pageSize: data?.size ?? 10,
@@ -234,7 +259,10 @@ export const DocumentHistoryDrawer: FC<DocumentHistoryDrawerProps> = ({
             showTotal: (total) => `共 ${total} 个版本`,
           }}
           onRow={(record) => ({
-            onClick: () => setSelectedVersion(record),
+            onClick: () => {
+              setSelectedVersion(record);
+              setShowVersionList(false);
+            },
           })}
           rowClassName={(record) =>
             record.version_number === selectedVersionNumber ? "document-history-selected-row" : ""
@@ -244,110 +272,112 @@ export const DocumentHistoryDrawer: FC<DocumentHistoryDrawerProps> = ({
         {tableData.length === 0 && !loading ? <Empty description="暂无历史版本" /> : null}
       </div>
 
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          gap: 16,
-          padding: "0 24px 24px",
-          borderTop: "1px solid #f0f0f0",
-          background: "#fafafa",
-        }}
-      >
-        {selectedVersion ? (
-          <>
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                background: "#0f172a",
-                borderRadius: 8,
-                overflow: "hidden",
-              }}
-            >
+      {!showVersionList ? (
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            gap: 16,
+            padding: "0 24px 24px",
+            borderTop: "1px solid #f0f0f0",
+            background: "#fafafa",
+          }}
+        >
+          {selectedVersion ? (
+            <>
               <div
                 style={{
-                  padding: "12px 16px",
-                  borderBottom: "1px solid rgba(255,255,255,0.1)",
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  background: "#0f172a",
+                  borderRadius: 8,
+                  overflow: "hidden",
                 }}
               >
-              <Space align="center" size={16}>
-                <Title level={5} style={{ margin: 0, color: "#e2e8f0" }}>
-                  版本 v{selectedVersion.version_number}
-                </Title>
-                <Text style={{ color: "#94a3b8" }}>
-                  更新于 {new Date(selectedVersion.created_at).toLocaleString()} ，操作者{" "}
-                  {selectedVersion.created_by || "-"}
-                </Text>
-              </Space>
-            </div>
-            {selectedVersion.change_message ? (
-                <Alert message={`备注：${selectedVersion.change_message}`} type="info" showIcon />
-              ) : null}
-              <div style={{ flex: 1, minHeight: 0 }}>
-                <Editor
-                  language={hasCustomPreview ? "yaml" : previewFormat === "html" ? "html" : "yaml"}
-                  value={previewContent}
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    lineNumbers: "on",
-                    wordWrap: "on",
-                    scrollBeyondLastLine: false,
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    borderBottom: "1px solid rgba(255,255,255,0.1)",
                   }}
-                  theme="vs-dark"
-                />
+                >
+                  <Space align="center" size={16}>
+                    <Title level={5} style={{ margin: 0, color: "#e2e8f0" }}>
+                      版本 v{selectedVersion.version_number}
+                    </Title>
+                    <Text style={{ color: "#94a3b8" }}>
+                      更新于 {new Date(selectedVersion.created_at).toLocaleString()} ，操作者{" "}
+                      {selectedVersion.created_by || "-"}
+                    </Text>
+                  </Space>
+                </div>
+                {selectedVersion.change_message ? (
+                  <Alert message={`备注：${selectedVersion.change_message}`} type="info" showIcon />
+                ) : null}
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  <Editor
+                    language={hasCustomPreview ? "yaml" : previewFormat === "html" ? "html" : "yaml"}
+                    value={previewContent}
+                    options={{
+                      readOnly: true,
+                      minimap: { enabled: false },
+                      lineNumbers: "on",
+                      wordWrap: "on",
+                      scrollBeyondLastLine: false,
+                    }}
+                    theme="vs-dark"
+                  />
+                </div>
               </div>
-            </div>
 
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  background: "#fff",
+                  borderRadius: 8,
+                  border: "1px solid #e0e0e0",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    borderBottom: "1px solid #f0f0f0",
+                    fontWeight: 500,
+                  }}
+                >
+                  渲染预览
+                </div>
+                <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+                  {hasCustomPreview ? (
+                    <YAMLPreview content={previewContent} documentType={previewDocumentType} />
+                  ) : previewFormat === "html" ? (
+                    <HTMLPreview content={previewContent} />
+                  ) : (
+                    <YAMLPreview content={previewContent} documentType={previewDocumentType} />
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
             <div
               style={{
                 flex: 1,
                 display: "flex",
-                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
                 background: "#fff",
                 borderRadius: 8,
-                border: "1px solid #e0e0e0",
-                overflow: "hidden",
+                border: "1px dashed #d9d9d9",
               }}
             >
-              <div
-                style={{
-                  padding: "12px 16px",
-                  borderBottom: "1px solid #f0f0f0",
-                  fontWeight: 500,
-                }}
-              >
-                渲染预览
-              </div>
-              <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
-                {hasCustomPreview ? (
-                  <YAMLPreview content={previewContent} documentType={previewDocumentType} />
-                ) : previewFormat === "html" ? (
-                  <HTMLPreview content={previewContent} />
-                ) : (
-                  <YAMLPreview content={previewContent} documentType={previewDocumentType} />
-                )}
-              </div>
+              <Empty description="请选择一个版本以查看详情" />
             </div>
-          </>
-        ) : (
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#fff",
-              borderRadius: 8,
-              border: "1px dashed #d9d9d9",
-            }}
-          >
-            <Empty description="请选择一个版本以查看详情" />
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      ) : null}
     </Drawer>
   );
 };
