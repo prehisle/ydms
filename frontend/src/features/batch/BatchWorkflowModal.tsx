@@ -750,6 +750,11 @@ export function BatchWorkflowModal({
                         current && (current.isBefore(dayjs(), "day") || current.isAfter(dayjs().add(14, "day"), "day"))
                       }
                     />
+                  ) : prop.type === "boolean" ? (
+                    <Switch
+                      checked={(customParams[key] as boolean) ?? (prop.default as boolean) ?? true}
+                      onChange={(val) => setCustomParams(prev => ({ ...prev, [key]: val }))}
+                    />
                   ) : (
                     <Input
                       placeholder={prop.description || `请输入${prop.title || key}`}
