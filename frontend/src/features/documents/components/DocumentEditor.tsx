@@ -4,6 +4,7 @@ import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import {
   Button,
+  Collapse,
   Input,
   InputNumber,
   Select,
@@ -222,6 +223,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
   const [metadataDifficulty, setMetadataDifficulty] = useState<number | null>(null);
   const [metadataTags, setMetadataTags] = useState<string[]>([]);
   const [metadataEntries, setMetadataEntries] = useState<MetadataEntry[]>([]);
+  const [metadataExpanded, setMetadataExpanded] = useState(false);
   const [pendingReferences, setPendingReferences] = useState<Array<{ document_id: number; title: string }>>([]);
   const [referenceModalOpen, setReferenceModalOpen] = useState(false);
 
@@ -608,7 +610,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
       switch (entry.type) {
         case "string":
           return (
-            <Input
+            <Input.TextArea
               placeholder="值"
               value={typeof entry.value === "string" ? entry.value : ""}
               onChange={(event) =>
@@ -618,7 +620,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
                   ),
                 )
               }
-              style={{ minWidth: 200 }}
+              autoSize={{ minRows: 1, maxRows: 6 }}
             />
           );
         case "number":
@@ -1053,92 +1055,104 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
           </div>
           <div
             style={{
-              padding: "12px 16px",
+              padding: "0 16px 12px",
               borderBottom: "1px solid #f0f0f0",
             }}
           >
-            <Space direction="vertical" style={{ width: "100%" }} size="middle">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Typography.Text strong>额外元数据</Typography.Text>
-                <Button
-                  type="dashed"
-                  icon={<PlusOutlined />}
-                  onClick={() => setMetadataEntries((prev) => [...prev, createEmptyEntry()])}
-                >
-                  添加字段
-                </Button>
-              </div>
-              <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                可为文档增加自定义键值对，支持字符串、数字、布尔值和字符串数组类型。
-              </Typography.Paragraph>
-              {metadataEntries.length === 0 ? (
-                <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                  尚未添加额外元数据。
-                </Typography.Paragraph>
-              ) : (
-                <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-                  {metadataEntries.map((entry) => (
-                    <Space
-                      key={entry.id}
-                      wrap
-                      align="start"
-                      style={{
-                        width: "100%",
-                        padding: "12px",
-                        border: "1px solid #f0f0f0",
-                        borderRadius: 6,
-                        background: "#fafafa",
+            <Collapse
+              activeKey={metadataExpanded ? ["extra-metadata"] : []}
+              onChange={(keys) => setMetadataExpanded(keys.includes("extra-metadata"))}
+              items={[
+                {
+                  key: "extra-metadata",
+                  label: `额外元数据（${metadataEntries.length}）`,
+                  extra: (
+                    <Button
+                      type="dashed"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMetadataEntries((prev) => [...prev, createEmptyEntry()]);
                       }}
                     >
-                      <Input
-                        placeholder="字段名"
-                        value={entry.key}
-                        onChange={(event) =>
-                          setMetadataEntries((prev) =>
-                            prev.map((item) =>
-                              item.id === entry.id ? { ...item, key: event.target.value } : item,
-                            ),
-                          )
-                        }
-                        style={{ minWidth: 160 }}
-                      />
-                      <Select
-                        value={entry.type}
-                        options={[
-                          { value: "string", label: "字符串" },
-                          { value: "number", label: "数字" },
-                          { value: "boolean", label: "布尔" },
-                          { value: "string[]", label: "字符串数组" },
-                        ]}
-                        onChange={(value: MetadataValueType) =>
-                          setMetadataEntries((prev) =>
-                            prev.map((item) =>
-                              item.id === entry.id
-                                ? {
-                                    ...item,
-                                    type: value,
-                                    value: getDefaultValueForType(value, item.value),
+                      添加字段
+                    </Button>
+                  ),
+                  children: (
+                    <div style={{ maxHeight: "calc(100vh - 300px)", overflowY: "auto" }}>
+                      {metadataEntries.length === 0 ? (
+                        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                          尚未添加额外元数据。点击"添加字段"开始。
+                        </Typography.Paragraph>
+                      ) : (
+                        <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+                          {metadataEntries.map((entry) => (
+                            <div
+                              key={entry.id}
+                              style={{
+                                padding: "12px",
+                                border: "1px solid #f0f0f0",
+                                borderRadius: 6,
+                                background: "#fafafa",
+                              }}
+                            >
+                              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                                <Input
+                                  placeholder="字段名"
+                                  value={entry.key}
+                                  onChange={(event) =>
+                                    setMetadataEntries((prev) =>
+                                      prev.map((item) =>
+                                        item.id === entry.id ? { ...item, key: event.target.value } : item,
+                                      ),
+                                    )
                                   }
-                                : item,
-                            ),
-                          )
-                        }
-                        style={{ width: 140 }}
-                      />
-                      {renderMetadataValueControl(entry)}
-                      <Button
-                        icon={<MinusCircleOutlined />}
-                        onClick={() =>
-                          setMetadataEntries((prev) => prev.filter((item) => item.id !== entry.id))
-                        }
-                      />
-                    </Space>
-                  ))}
-                </Space>
-              )}
-            </Space>
+                                  style={{ flex: 1 }}
+                                />
+                                <Select
+                                  value={entry.type}
+                                  options={[
+                                    { value: "string", label: "字符串" },
+                                    { value: "number", label: "数字" },
+                                    { value: "boolean", label: "布尔" },
+                                    { value: "string[]", label: "字符串数组" },
+                                  ]}
+                                  onChange={(value: MetadataValueType) =>
+                                    setMetadataEntries((prev) =>
+                                      prev.map((item) =>
+                                        item.id === entry.id
+                                          ? {
+                                              ...item,
+                                              type: value,
+                                              value: getDefaultValueForType(value, item.value),
+                                            }
+                                          : item,
+                                      ),
+                                    )
+                                  }
+                                  style={{ width: 140 }}
+                                />
+                                <Button
+                                  icon={<MinusCircleOutlined />}
+                                  onClick={() =>
+                                    setMetadataEntries((prev) => prev.filter((item) => item.id !== entry.id))
+                                  }
+                                />
+                              </div>
+                              <div>{renderMetadataValueControl(entry)}</div>
+                            </div>
+                          ))}
+                        </Space>
+                      )}
+                    </div>
+                  ),
+                },
+              ]}
+            />
           </div>
 
+          {!metadataExpanded && (
           <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
             <Editor
               language={editorLanguage}
@@ -1180,6 +1194,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({ mode, docId: docIdProp
               </div>
             )}
           </div>
+          )}
         </div>
 
         <div

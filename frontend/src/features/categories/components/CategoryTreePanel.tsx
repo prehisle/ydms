@@ -23,7 +23,6 @@ import {
   EditOutlined,
   LinkOutlined,
   ThunderboltOutlined,
-  SyncOutlined,
 } from "@ant-design/icons";
 
 import type { Category } from "../../../api/categories";
@@ -118,7 +117,6 @@ export interface CategoryTreePanelProps {
   setIsMutating: (value: boolean) => void;
   onDocumentDrop?: (targetNodeId: number, dragData: any) => void;
   onOpenBatchWorkflow?: (nodeIds: number[], nodeNames: string[]) => void;
-  onOpenBatchSync?: (nodeIds: number[], nodeNames: string[]) => void;
   /** 外部跳转时需要滚动到的节点 ID，设置后会自动展开路径并滚动 */
   scrollToNodeId?: number | null;
   /** 滚动完成后的回调，用于清除 scrollToNodeId */
@@ -175,7 +173,6 @@ export function CategoryTreePanel({
   setIsMutating,
   onDocumentDrop,
   onOpenBatchWorkflow,
-  onOpenBatchSync,
   scrollToNodeId,
   onScrollToNodeComplete,
 }: CategoryTreePanelProps) {
@@ -198,6 +195,7 @@ export function CategoryTreePanel({
 
   const {
     contextMenu,
+    adjustedPosition,
     openContextMenu,
     closeContextMenu,
     suppressNativeContextMenu,
@@ -808,29 +806,6 @@ export function CategoryTreePanel({
           },
         });
       }
-      if (onOpenBatchSync) {
-        items.push({
-          key: "batch-sync",
-          icon: <SyncOutlined />,
-          label: "批量同步文档",
-          disabled: isMutating,
-          onClick: () => {
-            closeContextMenu("action:batch-sync");
-            // 支持多选：如果有选中的节点，使用选中的节点；否则使用右键点击的节点
-            const targetIds = selectedIds.length > 0 ? selectedIds : [nodeId];
-            const targetNames = selectedIds.length > 0
-              ? selectedIds.map(id => lookups.byId.get(id)?.name || `节点${id}`)
-              : [targetNode.name];
-
-            if (targetIds.length === 0) {
-              messageApi.warning("请先选择要同步的节点");
-              return;
-            }
-
-            onOpenBatchSync(targetIds, targetNames);
-          },
-        });
-      }
       items.push({ type: "divider" });
     }
 
@@ -1079,7 +1054,6 @@ export function CategoryTreePanel({
     lookups,
     onOpenAddDocument,
     onOpenBatchWorkflow,
-    onOpenBatchSync,
     selectedIds,
     selectionParentId,
     contextMenu,
@@ -1252,8 +1226,8 @@ export function CategoryTreePanel({
           ref={menuContainerRef}
           style={{
             position: "fixed",
-            top: contextMenu.y,
-            left: contextMenu.x,
+            top: adjustedPosition.y,
+            left: adjustedPosition.x,
             zIndex: 1050,
             background: "#fff",
             border: "1px solid #d9d9d9",

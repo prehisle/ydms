@@ -168,7 +168,7 @@ export const DocumentPanel: FC<DocumentPanelProps> = ({
         title={
           <Space>
             <UploadOutlined />
-            <span>产出文档</span>
+            <span>文档列表</span>
           </Space>
         }
         extra={

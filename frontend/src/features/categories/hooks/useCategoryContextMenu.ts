@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import type { CategoryLookups, ParentKey } from "../types";
@@ -165,8 +165,31 @@ export function useCategoryContextMenu({
     [menuDebugEnabled],
   );
 
+  // 菜单打开后测量实际尺寸，动态调整坐标确保不超出视口
+  const [adjustedPosition, setAdjustedPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  useLayoutEffect(() => {
+    if (!contextMenu.open) return;
+    const el = menuContainerRef.current;
+    if (!el) {
+      setAdjustedPosition({ x: contextMenu.x, y: contextMenu.y });
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let top = contextMenu.y;
+    let left = contextMenu.x;
+    if (top + rect.height > vh) top = vh - rect.height - 8;
+    if (left + rect.width > vw) left = vw - rect.width - 8;
+    if (top < 0) top = 8;
+    if (left < 0) left = 8;
+    setAdjustedPosition({ x: left, y: top });
+  }, [contextMenu.open, contextMenu.x, contextMenu.y]);
+
   return {
     contextMenu,
+    adjustedPosition,
     openContextMenu,
     closeContextMenu,
     suppressNativeContextMenu,

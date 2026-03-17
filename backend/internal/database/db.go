@@ -176,6 +176,19 @@ func AutoMigrateWithDefaults(db *gorm.DB, defaults AdminDefaults) error {
 		log.Printf("Warning: failed to create sync_batches.created_by FK: %v", err)
 	}
 
+	// 数据兼容：历史版本曾写入 workflow_runs.status=completed，统一迁移为 success
+	normalizeResult := db.Model(&WorkflowRun{}).
+		Where("status = ?", "completed").
+		Updates(map[string]interface{}{
+			"status":      "success",
+			"finished_at": gorm.Expr("COALESCE(finished_at, updated_at, started_at, created_at)"),
+		})
+	if normalizeResult.Error != nil {
+		log.Printf("Warning: failed to normalize legacy workflow status: %v", normalizeResult.Error)
+	} else if normalizeResult.RowsAffected > 0 {
+		log.Printf("Normalized %d legacy workflow runs from completed to success", normalizeResult.RowsAffected)
+	}
+
 	log.Println("Database migrations completed successfully")
 
 	// 创建默认管理员账号（如果不存在）

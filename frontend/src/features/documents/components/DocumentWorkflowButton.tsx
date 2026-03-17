@@ -46,6 +46,7 @@ const statusColors: Record<string, string> = {
   pending: "default",
   running: "processing",
   success: "success",
+  completed: "success",
   failed: "error",
   cancelled: "warning",
 };
@@ -55,6 +56,7 @@ const statusLabels: Record<string, string> = {
   pending: "等待中",
   running: "运行中",
   success: "已完成",
+  completed: "已完成",
   failed: "失败",
   cancelled: "已取消",
 };
@@ -91,7 +93,12 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
     refetchInterval: (query) => {
       const run = query.state.data;
       if (!run) return 2000;
-      if (run.status === "success" || run.status === "failed" || run.status === "cancelled") {
+      if (
+        run.status === "success" ||
+        run.status === "completed" ||
+        run.status === "failed" ||
+        run.status === "cancelled"
+      ) {
         return false; // 停止轮询
       }
       return 2000; // 每2秒轮询一次
@@ -101,7 +108,7 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
   // 当任务完成/失败/取消时显示消息
   useEffect(() => {
     if (!currentRun) return;
-    if (currentRun.status === "success") {
+    if (currentRun.status === "success" || currentRun.status === "completed") {
       message.success("工作流执行完成");
       setProgressModalOpen(false);
       queryClient.invalidateQueries({
@@ -237,6 +244,7 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "success":
+      case "completed":
         return <CheckCircleOutlined style={{ color: "#52c41a" }} />;
       case "failed":
         return <CloseCircleOutlined style={{ color: "#ff4d4f" }} />;
@@ -303,7 +311,7 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
             </div>
             <Progress
               percent={
-                currentRun.status === "success"
+                currentRun.status === "success" || currentRun.status === "completed"
                   ? 100
                   : currentRun.status === "running"
                   ? 50
@@ -314,7 +322,7 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
               status={
                 currentRun.status === "failed"
                   ? "exception"
-                  : currentRun.status === "success"
+                  : currentRun.status === "success" || currentRun.status === "completed"
                   ? "success"
                   : "active"
               }
@@ -327,7 +335,7 @@ export const DocumentWorkflowButton: FC<DocumentWorkflowButtonProps> = ({
                 showIcon
               />
             )}
-            {currentRun.status === "success" && currentRun.result && (
+            {(currentRun.status === "success" || currentRun.status === "completed") && currentRun.result && (
               <Alert
                 type="success"
                 message="执行完成"

@@ -68,6 +68,11 @@ const statusConfig: Record<
     icon: <CheckCircleOutlined />,
     label: "成功",
   },
+  completed: {
+    color: "success",
+    icon: <CheckCircleOutlined />,
+    label: "已完成",
+  },
   failed: {
     color: "error",
     icon: <CloseCircleOutlined />,
@@ -420,7 +425,7 @@ export const SystemWorkflowRunsPage: FC = () => {
                 run.latest_retry_status ? statusConfig[run.latest_retry_status]?.label : "未知"
               }`}>
                 <Tag color={
-                  run.latest_retry_status === "success" ? "success" :
+                  run.latest_retry_status === "success" || run.latest_retry_status === "completed" ? "success" :
                   run.latest_retry_status === "failed" ? "error" :
                   run.latest_retry_status === "running" ? "processing" : "orange"
                 }>
@@ -463,7 +468,10 @@ export const SystemWorkflowRunsPage: FC = () => {
       render: (_, run) => {
         // 允许重新执行：成功、失败、已取消的任务都可以重试
         const canRetry =
-          run.status === "success" || run.status === "failed" || run.status === "cancelled";
+          run.status === "success" ||
+          run.status === "completed" ||
+          run.status === "failed" ||
+          run.status === "cancelled";
         const canCancel =
           run.status === "pending" || run.status === "running";
         const canForceTerminate = isZombieTask(run);

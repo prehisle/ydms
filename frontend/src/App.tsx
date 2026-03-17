@@ -56,8 +56,7 @@ import { DocumentHistoryDrawer } from "./features/documents/components/DocumentH
 import { DocumentTrashDrawer } from "./features/documents/components/DocumentTrashDrawer";
 import { DocumentReorderModal } from "./features/documents/components/DocumentReorderModal";
 import { SourceDocumentManager } from "./features/documents/components/SourceDocumentManager";
-import { WorkflowManager } from "./features/workflows";
-import { BatchWorkflowModal, BatchSyncModal } from "./features/batch";
+import { BatchWorkflowModal } from "./features/batch";
 import { StatusBar } from "./components/StatusBar";
 import { useDocumentDrag } from "./features/documents/hooks/useDocumentDrag";
 import { useTreeSiderState } from "./features/categories/hooks/useTreeSiderState";
@@ -516,26 +515,12 @@ export const DocumentsPage = () => {
     nodeNames: string[];
   }>({ open: false, nodeIds: [], nodeNames: [] });
 
-  const [batchSyncModal, setBatchSyncModal] = useState<{
-    open: boolean;
-    nodeIds: number[];
-    nodeNames: string[];
-  }>({ open: false, nodeIds: [], nodeNames: [] });
-
   const handleOpenBatchWorkflow = useCallback((nodeIds: number[], nodeNames: string[]) => {
     setBatchWorkflowModal({ open: true, nodeIds, nodeNames });
   }, []);
 
   const handleCloseBatchWorkflow = useCallback(() => {
     setBatchWorkflowModal((prev) => ({ ...prev, open: false }));
-  }, []);
-
-  const handleOpenBatchSync = useCallback((nodeIds: number[], nodeNames: string[]) => {
-    setBatchSyncModal({ open: true, nodeIds, nodeNames });
-  }, []);
-
-  const handleCloseBatchSync = useCallback(() => {
-    setBatchSyncModal((prev) => ({ ...prev, open: false }));
   }, []);
 
   const handleCopyDocument = useCallback(
@@ -820,7 +805,6 @@ export const DocumentsPage = () => {
     setIsMutating: setMutating,
     onDocumentDrop: handleDropOnNode,
     onOpenBatchWorkflow: handleOpenBatchWorkflow,
-    onOpenBatchSync: handleOpenBatchSync,
     scrollToNodeId,
     onScrollToNodeComplete: handleScrollToNodeComplete,
   };
@@ -1052,13 +1036,6 @@ export const DocumentsPage = () => {
         onClose={handleCloseBatchWorkflow}
         onSuccess={invalidateAllQueries}
       />
-      <BatchSyncModal
-        open={batchSyncModal.open}
-        nodeIds={batchSyncModal.nodeIds}
-        nodeNames={batchSyncModal.nodeNames}
-        onClose={handleCloseBatchSync}
-        onSuccess={invalidateAllQueries}
-      />
     </Layout>
   );
 };
@@ -1139,29 +1116,14 @@ interface DocumentContentSectionProps {
 }
 
 const DocumentContentSection = ({ breadcrumb, panel, sourceManager }: DocumentContentSectionProps) => {
-  // 当源文档变化时，通过 key 强制刷新 WorkflowManager
-  const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0);
-
-  const handleSourcesChanged = useCallback(() => {
-    setWorkflowRefreshKey(prev => prev + 1);
-  }, []);
-
   return (
     <Space direction="vertical" size="large" style={DOCUMENT_STACK_STYLE}>
       <CategoryBreadcrumb {...breadcrumb} />
       {sourceManager?.nodeId != null && (
-        <>
-          <SourceDocumentManager
-            nodeId={sourceManager.nodeId}
-            canEdit={sourceManager.canEdit}
-            onSourcesChanged={handleSourcesChanged}
-          />
-          <WorkflowManager
-            key={workflowRefreshKey}
-            nodeId={sourceManager.nodeId}
-            canEdit={sourceManager.canEdit}
-          />
-        </>
+        <SourceDocumentManager
+          nodeId={sourceManager.nodeId}
+          canEdit={sourceManager.canEdit}
+        />
       )}
       <DocumentPanel {...panel} />
     </Space>

@@ -29,7 +29,7 @@ export interface WorkflowRun {
   node_id?: number;
   document_id?: number;
   parameters: Record<string, unknown>;
-  status: "pending" | "running" | "success" | "failed" | "cancelled";
+  status: "pending" | "running" | "success" | "failed" | "cancelled" | "completed";
   prefect_flow_run_id?: string;
   result?: Record<string, unknown>;
   error_message?: string;
@@ -46,7 +46,7 @@ export interface WorkflowRun {
   // 重试关联
   retry_of_id?: number;  // 重试来源任务 ID
   retry_count?: number;  // 被重试的次数
-  latest_retry_status?: "pending" | "running" | "success" | "failed" | "cancelled";  // 最新重试状态
+  latest_retry_status?: "pending" | "running" | "success" | "failed" | "cancelled" | "completed";  // 最新重试状态
 }
 
 // 触发工作流请求

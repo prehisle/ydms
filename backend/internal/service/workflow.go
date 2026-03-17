@@ -24,6 +24,8 @@ const (
 	WorkflowStatusSuccess   = "success"
 	WorkflowStatusFailed    = "failed"
 	WorkflowStatusCancelled = "cancelled"
+	// 兼容历史遗留状态（2026-02-11 之前部分任务写入为 completed）
+	WorkflowStatusCompletedLegacy = "completed"
 )
 
 // ZombieTaskTimeout 僵尸任务超时时间（超过此时间的 running 任务可被强制终止）
@@ -137,8 +139,8 @@ type TriggerWorkflowRequest struct {
 	NodeID       int64                  `json:"node_id"`
 	WorkflowKey  string                 `json:"workflow_key"`
 	Parameters   map[string]interface{} `json:"parameters,omitempty"`
-	SourceDocIDs []int64                `json:"-"`                      // 预获取的源文档 ID（内部使用，跳过重复查询）
-	RetryOfID    *uint                  `json:"retry_of_id,omitempty"`  // 重试来源任务 ID
+	SourceDocIDs []int64                `json:"-"`                     // 预获取的源文档 ID（内部使用，跳过重复查询）
+	RetryOfID    *uint                  `json:"retry_of_id,omitempty"` // 重试来源任务 ID
 }
 
 // TriggerDocumentWorkflowRequest represents a request to trigger a workflow on a document.
@@ -615,8 +617,8 @@ type ListWorkflowRunsParams struct {
 // WorkflowRunInfo extends WorkflowRun with retry count for API responses.
 type WorkflowRunInfo struct {
 	database.WorkflowRun
-	RetryCount        int     `json:"retry_count"`                    // 被重试的次数
-	LatestRetryStatus *string `json:"latest_retry_status,omitempty"`  // 最新重试的状态（用于闭环）
+	RetryCount        int     `json:"retry_count"`                   // 被重试的次数
+	LatestRetryStatus *string `json:"latest_retry_status,omitempty"` // 最新重试的状态（用于闭环）
 }
 
 // ListWorkflowRunsResponse response for listing workflow runs.
@@ -624,6 +626,44 @@ type ListWorkflowRunsResponse struct {
 	Runs    []WorkflowRunInfo `json:"runs"`
 	Total   int64             `json:"total"`
 	HasMore bool              `json:"has_more"`
+}
+
+// expandWorkflowStatusAliases expands legacy status aliases used by old data.
+// Legacy "completed" is semantically equivalent to "success".
+func expandWorkflowStatusAliases(statuses []string) []string {
+	if len(statuses) == 0 {
+		return statuses
+	}
+
+	expanded := make([]string, 0, len(statuses)+1)
+	seen := make(map[string]struct{}, len(statuses)+1)
+	hasSuccess := false
+	hasCompleted := false
+
+	for _, raw := range statuses {
+		status := strings.TrimSpace(raw)
+		if status == "" {
+			continue
+		}
+		if _, ok := seen[status]; ok {
+			continue
+		}
+		seen[status] = struct{}{}
+		expanded = append(expanded, status)
+		if status == WorkflowStatusSuccess {
+			hasSuccess = true
+		}
+		if status == WorkflowStatusCompletedLegacy {
+			hasCompleted = true
+		}
+	}
+
+	// Success queries should also match legacy completed records.
+	if hasSuccess && !hasCompleted {
+		expanded = append(expanded, WorkflowStatusCompletedLegacy)
+	}
+
+	return expanded
 }
 
 // ListWorkflowRuns lists workflow runs with optional filters.
@@ -640,7 +680,12 @@ func (s *WorkflowService) ListWorkflowRuns(ctx context.Context, params ListWorkf
 		query = query.Where("workflow_key = ?", *params.WorkflowKey)
 	}
 	if len(params.Status) > 0 {
-		query = query.Where("status IN ?", params.Status)
+		statuses := expandWorkflowStatusAliases(params.Status)
+		if len(statuses) > 0 {
+			query = query.Where("status IN ?", statuses)
+		} else {
+			query = query.Where("1 = 0")
+		}
 	}
 
 	var total int64
@@ -748,7 +793,7 @@ type WorkflowCallbackRequest struct {
 
 // normalizeCallbackStatus 归一化回调状态值
 func normalizeCallbackStatus(s string) string {
-	if s == "completed" {
+	if s == WorkflowStatusCompletedLegacy {
 		return WorkflowStatusSuccess
 	}
 	return s
@@ -1008,7 +1053,7 @@ type CleanupWorkflowRunsResponse struct {
 }
 
 // CleanupWorkflowRuns 清理执行历史记录
-// 只清理已完成的任务（success, failed, cancelled），不清理 pending 和 running
+// 只清理已完成的任务（success/completed, failed, cancelled），不清理 pending 和 running
 // 如果 IncludeZombie=true，也会清理运行超过 30 分钟的僵尸任务
 // 如果 ForceCleanupActive=true，会清理所有 pending/running 任务（不仅仅是僵尸任务）
 func (s *WorkflowService) CleanupWorkflowRuns(ctx context.Context, params CleanupWorkflowRunsParams) (*CleanupWorkflowRunsResponse, error) {
@@ -1017,6 +1062,7 @@ func (s *WorkflowService) CleanupWorkflowRuns(ctx context.Context, params Cleanu
 	if len(allowedStatuses) == 0 {
 		allowedStatuses = []string{WorkflowStatusSuccess, WorkflowStatusFailed, WorkflowStatusCancelled}
 	}
+	allowedStatuses = expandWorkflowStatusAliases(allowedStatuses)
 
 	// 验证状态值，确保不会清理 pending 或 running 的任务（除非启用了相关选项）
 	hasActiveStatus := false
